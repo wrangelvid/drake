@@ -10,12 +10,10 @@ from pydrake.geometry import (
 )
 from pydrake.math import RigidTransform
 from pydrake.multibody.parsing import Parser
-from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
-from pydrake.systems.framework import DiagramBuilder
-from pydrake.solvers.mathematicalprogram import (
-    MathematicalProgram, MathematicalProgramResult, Binding, Cost, Constraint
+from pydrake.multibody.plant import (
+    AddMultibodyPlantSceneGraph, CoulombFriction,
 )
-from pydrake.symbolic import Variable
+from pydrake.solvers.mathematicalprogram import MathematicalProgram
 
 
 class TestGeometryOptimization(unittest.TestCase):
@@ -221,7 +219,7 @@ class TestGeometryOptimization(unittest.TestCase):
             obstacles=obstacles, sample=[2, 3.4, 5],
             domain=mut.HPolyhedron.MakeBox(
                 lb=[-5, -5, -5], ub=[5, 5, 5]), options=options)
-        self.assertIsInstance(region, mut.HPolyhedron)
+        self.assertIsInstance(region, mut.optimization.HPolyhedron)
 
     def test_iris_cspace(self):
         limits_urdf = """
@@ -244,65 +242,12 @@ class TestGeometryOptimization(unittest.TestCase):
         plant.Finalize()
         diagram = builder.Build()
         context = diagram.CreateDefaultContext()
-        options = mut.IrisOptions()
-        region = mut.IrisInConfigurationSpace(
+        options = mut.optimization.IrisOptions()
+        region = mut.optimization.IrisInConfigurationSpace(
             plant=plant,
             context=plant.GetMyContextFromRoot(context),
             sample=[0], options=options)
-        self.assertIsInstance(region, mut.ConvexSet)
+        self.assertIsInstance(region, mut.optimization.ConvexSet)
         self.assertEqual(region.ambient_dimension(), 1)
         self.assertTrue(region.PointInSet([1.0]))
         self.assertFalse(region.PointInSet([3.0]))
-
-    def test_graph_of_convex_sets(self):
-        spp = mut.GraphOfConvexSets()
-        source = spp.AddVertex(set=mut.Point([0.1]), name="source")
-        target = spp.AddVertex(set=mut.Point([0.2]), name="target")
-        edge0 = spp.AddEdge(u=source, v=target, name="edge0")
-        edge1 = spp.AddEdge(u_id=source.id(), v_id=target.id(), name="edge1")
-        self.assertEqual(len(spp.Vertices()), 2)
-        self.assertEqual(len(spp.Edges()), 2)
-        result = spp.SolveShortestPath(
-            source_id=source.id(), target_id=target.id(),
-            convex_relaxation=True)
-        self.assertIsInstance(result, MathematicalProgramResult)
-        self.assertIsInstance(spp.SolveShortestPath(
-            source=source, target=target, convex_relaxation=True),
-            MathematicalProgramResult)
-        self.assertIn("source", spp.GetGraphvizString(
-            result=result, show_slacks=True, precision=2, scientific=False))
-
-        # Vertex
-        self.assertIsInstance(source.id(), mut.GraphOfConvexSets.VertexId)
-        self.assertEqual(source.ambient_dimension(), 1)
-        self.assertEqual(source.name(), "source")
-        self.assertIsInstance(source.x()[0], Variable)
-        self.assertIsInstance(source.set(), mut.Point)
-        np.testing.assert_array_almost_equal(
-            source.GetSolution(result), [0.1], 1e-6)
-
-        # Edge
-        self.assertAlmostEqual(edge0.GetSolutionCost(result=result), 0.0, 1e-6)
-        np.testing.assert_array_almost_equal(
-            edge0.GetSolutionPhiXu(result=result), [0.1], 1e-6)
-        np.testing.assert_array_almost_equal(
-            edge0.GetSolutionPhiXv(result=result), [0.2], 1e-6)
-        self.assertIsInstance(edge0.id(), mut.GraphOfConvexSets.EdgeId)
-        self.assertEqual(edge0.name(), "edge0")
-        self.assertEqual(edge0.u(), source)
-        self.assertEqual(edge0.v(), target)
-        self.assertIsInstance(edge0.phi(), Variable)
-        self.assertIsInstance(edge0.xu()[0], Variable)
-        self.assertIsInstance(edge0.xv()[0], Variable)
-        var, binding = edge0.AddCost(e=1.0+edge0.xu()[0])
-        self.assertIsInstance(var, Variable)
-        self.assertIsInstance(binding, Binding[Cost])
-        var, binding = edge0.AddCost(binding=binding)
-        self.assertIsInstance(var, Variable)
-        self.assertIsInstance(binding, Binding[Cost])
-        binding = edge0.AddConstraint(f=(edge0.xu()[0] == edge0.xv()[0]))
-        self.assertIsInstance(binding, Binding[Constraint])
-        binding = edge0.AddConstraint(binding=binding)
-        self.assertIsInstance(binding, Binding[Constraint])
-        edge0.AddPhiConstraint(phi_value=False)
-        edge0.ClearPhiConstraints()

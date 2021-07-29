@@ -366,7 +366,7 @@ bool FindClosestCollision(
     // Use kNonconvex instead of the default kConvexSmooth.
     std::vector<solvers::Binding<solvers::LorentzConeConstraint>> to_replace =
         prog.lorentz_cone_constraints();
-    for (const auto& binding : to_replace) {
+    for (const auto binding : to_replace) {
       const auto c = binding.evaluator();
       prog.AddConstraint(
           std::make_shared<solvers::LorentzConeConstraint>(
@@ -374,7 +374,7 @@ bool FindClosestCollision(
               solvers::LorentzConeConstraint::EvalType::kNonconvex),
           binding.variables());
     }
-    for (const auto& binding : to_replace) {
+    for (const auto binding : to_replace) {
       prog.RemoveConstraint(binding);
     }
   }
@@ -403,7 +403,7 @@ void AddTangentToPolytope(
   }
 
   A->row(*num_constraints) =
-        (E.A().transpose() * E.A() *(point - E.center())).normalized();
+        (2.0 * E.A().transpose() * E.A() *(point - E.center())).normalized();
   (*b)[*num_constraints] =
       A->row(*num_constraints) * point - options.configuration_space_margin;
   *num_constraints += 1;
@@ -491,7 +491,7 @@ HPolyhedron IrisInConfigurationSpace(
 
     // First use a fast nonlinear optimizer to add as many constraint as it
     // can find.
-    for (const auto& [geomA, geomB] : pairs) {
+    for (const auto [geomA, geomB] : pairs) {
       while (FindClosestCollision(
           same_point_constraint, *frames.at(geomA), *frames.at(geomB),
           *sets.at(geomA), *sets.at(geomB), E, A.topRows(num_constraints),
@@ -504,7 +504,7 @@ HPolyhedron IrisInConfigurationSpace(
       // Now loop back through and use Ibex for rigorous certification.
       // TODO(russt): Consider (re-)implementing a "feasibility only" version of
       // the IRIS check + nonlinear optimization to improve.
-      for (const auto& [geomA, geomB] : pairs) {
+      for (const auto [geomA, geomB] : pairs) {
         while (FindClosestCollision(
             same_point_constraint, *frames.at(geomA), *frames.at(geomB),
             *sets.at(geomA), *sets.at(geomB), E, A.topRows(num_constraints),
