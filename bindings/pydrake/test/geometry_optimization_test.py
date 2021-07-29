@@ -5,6 +5,10 @@ import unittest
 import numpy as np
 
 from pydrake.math import RigidTransform
+from pydrake.multibody.parsing import Parser
+from pydrake.multibody.plant import (
+    AddMultibodyPlantSceneGraph, CoulombFriction,
+)
 from pydrake.solvers.mathematicalprogram import MathematicalProgram
 
 
@@ -203,3 +207,34 @@ class TestGeometryOptimization(unittest.TestCase):
             domain=mut.optimization.HPolyhedron.MakeBox(
                 lb=[-5, -5, -5], ub=[5, 5, 5]), options=options)
         self.assertIsInstance(region, mut.optimization.HPolyhedron)
+
+    def test_iris_cspace(self):
+        limits_urdf = """
+<robot name="limits">
+  <link name="movable">
+    <collision>
+      <geometry><box size="1 1 1"/></geometry>
+    </collision>
+  </link>
+  <joint name="movable" type="prismatic">
+    <axis xyz="1 0 0"/>
+    <limit lower="-2" upper="2"/>
+    <parent link="world"/>
+    <child link="movable"/>
+  </joint>
+</robot>"""
+        builder = DiagramBuilder()
+        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
+        Parser(plant).AddModelFromString(limits_urdf, "urdf")
+        plant.Finalize()
+        diagram = builder.Build()
+        context = diagram.CreateDefaultContext()
+        options = mut.optimization.IrisOptions()
+        region = mut.optimization.IrisInConfigurationSpace(
+            plant=plant,
+            context=plant.GetMyContextFromRoot(context),
+            sample=[0], options=options)
+        self.assertIsInstance(region, mut.optimization.ConvexSet)
+        self.assertEqual(region.ambient_dimension(), 1)
+        self.assertTrue(region.PointInSet([1.0]))
+        self.assertFalse(region.PointInSet([3.0]))
