@@ -197,14 +197,13 @@ VectorXd ExtractMidpoints(const ibex::IntervalVector& iv) {
 void DoOptimize(const ibex::System& sys, const IbexOptions& options,
                 MathematicalProgramResult* const result) {
   const bool in_hc4 = !(sys.nb_ctr > 0 && sys.nb_ctr < sys.f_ctrs.image_dim());
-  const bool kkt = (sys.nb_ctr == 0);
-  ibex::DefaultOptimizerConfig config(sys, options.rel_eps_f, options.abs_eps_f,
-                                      options.eps_h, options.rigor, in_hc4, kkt,
-                                      options.random_seed, options.eps_x);
+  ibex::DefaultOptimizerConfig config(
+      sys, options.rel_eps_f, options.abs_eps_f, options.eps_h, options.rigor,
+      in_hc4, false, options.random_seed, options.eps_x);
 
   config.set_trace(options.trace);
   config.set_timeout(options.timeout);
-  ibex::Optimizer o(config);
+  ibex::DefaultOptimizer o(sys);
   const ibex::Optimizer::Status status = o.optimize(sys.box);
 
   switch (status) {
