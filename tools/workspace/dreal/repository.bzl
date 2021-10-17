@@ -13,5 +13,5 @@ def dreal_repository(
         mirrors = mirrors,
         patches = [
             "@drake//tools/workspace/dreal:ibex_2.8.6.patch",
-        ],
+        ]
     )
