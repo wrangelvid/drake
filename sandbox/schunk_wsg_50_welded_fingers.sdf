@@ -28,7 +28,7 @@
           <diffuse>0.7 0.7 0.7 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+      <collision name="body_collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
@@ -112,7 +112,7 @@
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+      <collision name="left_collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
@@ -193,7 +193,7 @@
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+      <collision name="right_collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
