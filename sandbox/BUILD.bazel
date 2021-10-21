@@ -1,16 +1,32 @@
 # -*- python -*-
 # This file contains rules for Bazel; see drake/doc/bazel.rst.
 
+load(
+    "@drake//tools/skylark:drake_cc.bzl",
+    "drake_cc_binary",
+    "drake_cc_googletest",
+    "drake_cc_library",
+    "drake_cc_package_library",
+)
 load("//tools/jupyter:jupyter_py.bzl", "drake_jupyter_py_binary")
+
+filegroup(
+    name = "models",
+    data = [
+        "planar_iiwa_simple_collision_welded_gripper.yaml",
+        "planar_iiwa14_one_sphere.urdf",
+        "schunk_wsg_50_welded_fingers.sdf",
+        "shelves.sdf",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 drake_jupyter_py_binary(
     name = "fast_planar_iiwa",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
-        "planar_iiwa14_one_sphere.urdf",
-        "schunk_wsg_50_welded_fingers.sdf",
-        "shelves.sdf",
+        "//sandbox:models",
     ],
     deps = [
         "//bindings/pydrake",
