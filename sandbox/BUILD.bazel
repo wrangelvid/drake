@@ -13,6 +13,7 @@ load("//tools/jupyter:jupyter_py.bzl", "drake_jupyter_py_binary")
 filegroup(
     name = "models",
     data = [
+        "planar_iiwa_dense_collision_welded_gripper.yaml",
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "planar_iiwa14_one_sphere.urdf",
         "schunk_wsg_50_welded_fingers.sdf",
