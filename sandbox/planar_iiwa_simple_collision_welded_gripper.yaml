@@ -11,22 +11,22 @@ directives:
     parent: world
     child: iiwa::iiwa_link_0
 
-# # Add schunk
-# - add_model:
-#     name: wsg
-#     file: package://drake/sandbox/schunk_wsg_50_welded_fingers.sdf
-#     # file: package://drake/manipulation/models/wsg_50_description/sdf/schunk_wsg_50_no_tip.sdf
+# Add schunk
+- add_model:
+    name: wsg
+    file: package://drake/sandbox/schunk_wsg_50_welded_fingers.sdf
+    # file: package://drake/manipulation/models/wsg_50_description/sdf/schunk_wsg_50_no_tip.sdf
 
-# - add_frame:
-#     name: iiwa::wsg_attach
-#     X_PF:
-#       base_frame: iiwa::iiwa_link_7
-#       translation: [0, 0, 0.114]
-#       rotation: !Rpy { deg: [90.0, 0.0, 0.0 ]}
+- add_frame:
+    name: iiwa::wsg_attach
+    X_PF:
+      base_frame: iiwa::iiwa_link_7
+      translation: [0, 0, 0.114]
+      rotation: !Rpy { deg: [90.0, 0.0, 0.0 ]}
 
-# - add_weld:
-#     parent: iiwa::wsg_attach
-#     child: wsg::body
+- add_weld:
+    parent: iiwa::wsg_attach
+    child: wsg::body
 
 # Add shelves
 - add_model:
