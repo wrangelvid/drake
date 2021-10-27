@@ -4,6 +4,18 @@ load("//tools/install:install.bzl", "install")
 load("//tools/jupyter:jupyter_py.bzl", "drake_jupyter_py_binary")
 load("//tools/lint:lint.bzl", "add_lint_tests")
 
+load(
+    "@drake//tools/skylark:drake_cc.bzl",
+    "drake_cc_binary",
+    "drake_cc_googletest",
+    "drake_cc_library",
+)
+load("//tools/lint:lint.bzl", "add_lint_tests")
+
+package(default_visibility = ["//visibility:public"])
+
+
+
 drake_jupyter_py_binary(
     name = "view_models",
     add_test_rule = 0,
@@ -21,6 +33,43 @@ install(
     visibility = ["//visibility:public"],
     deps = [
         "//planning/models:install_data",
+    ],
+)
+
+# drake_cc_library(
+#     name = "rigid_transform",
+#     srcs = [
+#         "rigid_transform.cc",
+#     ],
+#     hdrs = [
+#         "rigid_transform.h",
+#     ],
+#     deps = [
+#         "//common:default_scalars",
+#         "//common:essential",
+#     ],
+# )
+
+# === test/ ===
+
+# drake_cc_googletest(
+#     name = "rigid_transform_test",
+#     deps = [
+#         ":autodiff",
+#         ":rigid_transform",
+#         "//common/test_utilities",
+#     ],
+# )
+
+drake_cc_binary(
+    name = "cru_example",
+    srcs = [
+        "cru_example.cc",
+    ],
+    deps = [
+        "//common",
+        "@common_robotics_utilities",
+        "@gflags",
     ],
 )
 
