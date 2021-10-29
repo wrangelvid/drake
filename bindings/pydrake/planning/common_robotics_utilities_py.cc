@@ -4,6 +4,7 @@
 #include "pybind11/stl.h"
 #include <common_robotics_utilities/simple_rrt_planner.hpp>
 #include <common_robotics_utilities/simple_prm_planner.hpp>
+#include <common_robotics_utilities/simple_graph.hpp>
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -75,15 +76,7 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
       py::arg("termination_check_fn"), "");
 
   //Simple graph for PRM
-  {
-    using Class = simple_graph::GraphEdge;
-    py::class_<Class>(m, "GraphEdge", "")
-        .def(py::init<>(), "")
-        .def(py::init<const int64_t, int64_t, double, uint64_t>(),
-            py::arg("from_index"), py::arg("to_index"), py::arg("weight"), py::arg("scratchpad"), "")
-        .def(py::init<const int64_t, int64_t, double, uint64_t>(),
-            py::arg("from_index"), py::arg("to_index"), py::arg("weight"),  "");
-  }
+
   {
     using Class = simple_graph::GraphNode<VectorXd>;
     py::class_<Class>(m, "GraphNode", "")
@@ -93,31 +86,35 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
   }
 
   {
-    using Class = simple_graph::Graph<VectorXd>;
-    py::class_<Class>(m, "Graph", "")
+    using Class = simple_graph::GraphEdge;
+    py::class_<Class>(m, "GraphEdge", "")
         .def(py::init<>(), "")
-        .def(py::init<const VectorXd&>(), py::arg("node"), "")
-        .def(py::init<const size_t>(), py::arg("expected_size"), "");
+        .def(py::init<const int64_t, const int64_t, const double, const uint64_t>(),
+            py::arg("from_index"), py::arg("to_index"), py::arg("weight"), py::arg("scratchpad"), "")
+        .def(py::init<const int64_t, const int64_t, const double, const uint64_t>(),
+            py::arg("from_index"), py::arg("to_index"), py::arg("weight"),  "");
   }
 
+  {
+    using Class = simple_graph::Graph<VectorXd>;
+    py::class_<Class>(m, "Graph", "")
+        .def(py::init<>(), "");
+  }
 
 
   //PRM 
   m.def("AddNodeToRoadmap", &simple_prm_planner::AddNodeToRoadmap<VectorXd>, py::arg("state"),
-      py::arg("nn_distance_direction"), py::arg("roadmap"),
-      py::arg("distance_fn"), py::arg("edge_validity_check_fn"),
-      py::arg("K"), py::arg("use_parallel"), py::arg("distance_is_symmetric"),
-      py::arg("add_duplicate_states"), "");
-
-  m.def("GrowRoadMap", &simple_prm_planner::GrowRoadMap<VectorXd>, py::arg("roadmap"),
-      py::arg("sampling_fn"), py::arg("distance_fn"),
-      py::arg("state_validity_check_fn"),py::arg("edge_validity_check_fn"),
-      py::arg("termination_check_fn"), py::arg("K"), py::arg("use_parallel"),
+      py::arg("nn_distance_direction"), py::arg("roadmap"), py::arg("distance_fn"),
+      py::arg("edge_validity_check_fn"), py::arg("K"), py::arg("use_parallel"),
       py::arg("distance_is_symmetric"), py::arg("add_duplicate_states"), "");
 
-  m.def("UpdateRoadMapEdges", &simple_prm_planner::UpdateRoadMapEdges<VectorXd>,
-      py::arg("roadmap"), py::arg("edge_validity_check_fn"),
-      py::arg("distance_fn"), py::arg("K"), py::arg("use_parallel"),"");
+  m.def("GrowRoadMap", &simple_prm_planner::GrowRoadMap<VectorXd>, py::arg("roadmap"),
+      py::arg("sampling_fn"), py::arg("distance_fn"), py::arg("state_validity_check_fn"),
+      py::arg("edge_validity_check_fn"), py::arg("termination_check_fn"), py::arg("K"),
+      py::arg("use_parallel"), py::arg("distance_is_symmetric"), py::arg("add_duplicate_states"), "");
+
+  m.def("UpdateRoadMapEdges", &simple_prm_planner::UpdateRoadMapEdges<VectorXd>, py::arg("roadmap"),
+      py::arg("edge_validity_check_fn"), py::arg("distance_fn"), py::arg("use_parallel"), "");
 
   m.def("ExtractSolution", &simple_prm_planner::ExtractSolution<VectorXd>,
       py::arg("roadmap"), py::arg("astar_index_solution"), "");
