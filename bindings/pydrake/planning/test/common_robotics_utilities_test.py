@@ -107,7 +107,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
         def distance_fn(start, end):
             return np.linalg.norm(end - start)
         
-        def check_state_validity_fn(point):
+        def check_state_validity_fn(point)
             x, y = point
             return test_env[y][x] != '#'
         
