@@ -188,6 +188,8 @@ void DefineGeometryOptimization(py::module m) {
     py::implicitly_convertible<VPolytope, copyable_unique_ptr<ConvexSet>>();
   }
 
+  // Iris
+  {
   py::class_<IrisOptions>(m, "IrisOptions", doc.IrisOptions.doc)
       .def(py::init<>(), doc.IrisOptions.ctor.doc)
       .def_readwrite("require_sample_point_is_contained",
@@ -211,6 +213,19 @@ void DefineGeometryOptimization(py::module m) {
       py::arg("context"), py::arg("sample"), py::arg("options") = IrisOptions(),
       doc.IrisInConfigurationSpace.doc);
 
+  py::class_<IrisConvexSetMaker>(m, "IrisConvexSetMaker", doc.IrisConvexSetMaker.doc)
+      .def(py::init<>(), doc.IrisOptions.ctor.doc)
+      .def_readwrite("require_sample_point_is_contained",
+          &IrisOptions::require_sample_point_is_contained,
+          doc.IrisOptions.require_sample_point_is_contained.doc)
+      .def_readwrite("iteration_limit", &IrisOptions::iteration_limit,
+          doc.IrisOptions.iteration_limit.doc)
+      .def_readwrite("termination_threshold",
+          &IrisOptions::termination_threshold,
+          doc.IrisOptions.termination_threshold.doc)
+      .def_readwrite("enable_ibex", &IrisOptions::enable_ibex,
+          doc.IrisOptions.enable_ibex.doc);
+  }
   {
     const auto& cls_doc = doc.BsplineTrajectoryThroughUnionOfHPolyhedra;
     using Class = BsplineTrajectoryThroughUnionOfHPolyhedra;

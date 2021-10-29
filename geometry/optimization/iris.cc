@@ -115,7 +115,7 @@ HPolyhedron Iris(const ConvexSets& obstacles, const Ref<const VectorXd>& sample,
   return P;
 }
 
-namespace {
+//namespace {
 // Constructs a ConvexSet for each supported Shape and adds it to the set.
 class IrisConvexSetMaker final : public ShapeReifier {
  public:
@@ -181,7 +181,7 @@ class IrisConvexSetMaker final : public ShapeReifier {
   GeometryId geom_id_{};
 };
 
-}  // namespace
+//}  // namespace
 
 ConvexSets MakeIrisObstacles(const QueryObject<double>& query_object,
                              std::optional<FrameId> reference_frame) {
