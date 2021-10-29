@@ -44,7 +44,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
                 extend = nearest + step_size/extend_dist * (sample - nearest)
 
             check_dist = distance_fn(nearest, extend)
-            for ii in range(1, check_dist//check_step):
+            for ii in range(1, int(check_dist/check_step)):
                 check_point = nearest \
                     + ii * check_step / check_dist * (extend - nearest)
                 if (check_point[0] >= 1 and check_point[0] <= 2
@@ -65,4 +65,3 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
             termination_check_fn=termination_fn)
 
         print(single_result.Path())
-        self.assertTrue(False)
