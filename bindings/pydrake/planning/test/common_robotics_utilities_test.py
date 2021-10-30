@@ -10,6 +10,9 @@ from pydrake.planning.common_robotics_utilities import (
     Graph,
     GrowRoadMap,
     UpdateRoadMapEdges,
+    QueryPath,
+    LazyQueryPath,
+    ResamplePath,
 )
 
 
@@ -143,6 +146,30 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
         def ResamplePoints(points):
             return ResamplePath(points, 0.5, distance_fn, interpolate_point)
         
+        def drawEnvironment(env):
+            print("".join(list(map(lambda row: row + "\n", env))))
+            
+        def drawRoadmap(roadmap):
+            tmp_env = test_env.copy()
+    
+            roadmap_nodes = roadmap.GetNodesImmutable()
+    
+            for roadmap_node in roadmap_nodes:
+                out_edges = roadmap_node.GetOutEdgesImmutable()
+                for edge in out_edges:
+                    self_point = roadmap.GetNodeImmutable(edge.GetFromIndex()).GetValueImmutable()
+                    other_point = roadmap.GetNodeImmutable(edge.GetToIndex()).GetValueImmutable()
+                    edge_path = ResamplePoints([self_point, other_point])
+            
+                    for point in edge_path:
+                        current_val = getCell(tmp_env, point)
+                        if current_val != '+':
+                            setCell(tmp_env, point, '-')
+                    setCell(tmp_env, self_point, '+')
+                    setCell(tmp_env, other_point, '+')
+    
+            drawEnvironment(tmp_env)
+
         def drawPath(env, starts, goals, path):
             tmp_env = env.copy()
             if len(path) > 0:
@@ -161,7 +188,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
             for start in starts:  setCell(tmp_env, start, 'S')
             for goal in goals:  setCell(tmp_env, goal, 'G')
         
-            print("".join(list(map(lambda row: row + "\n", tmp_env))))
+            drawEnvironment(tmp_env)
         
         def check_path(path):
             self.assertTrue(len(path) >= 2)
@@ -219,7 +246,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
         self.assertTrue(parallel_pruned_roadmap.CheckGraphLinkage())
 
         #test planning 
-        keypoints = [np.array([1, 1]), np.array([18, 18]), np.array([7, 13]), np.array([9, 5])];
+        keypoints = [np.array([1, 1]), np.array([18, 18]), np.array([7, 13]), np.array([9, 5])]
         
         for start in keypoints:
             for goal in keypoints:
