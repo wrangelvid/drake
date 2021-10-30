@@ -99,6 +99,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
 
         def roadmap_termination_fn(current_roadmap_size):
             return current_roadmap_size >= roadmap_size
+
         def state_sampling_fn():
             x = np.random.randint(test_env_shape[0])
             y = np.random.randint(test_env_shape[1])
@@ -114,31 +115,34 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
 
         def check_edge_validity_fn(start, end):
             def checkEdgeCollisionFree(start, end, stepsize):
-                num_steps = np.ceil(distance_fn(start,end)/stepsize)
+                num_steps = np.ceil(distance_fn(start, end)/stepsize)
 
                 for step in range(int(num_steps)+1):
                     interpolation_ratio = step / num_steps
-                    interpolated_point = start + np.round(interpolation_ratio*(start-end))
+                    interpolated_point = start + np.round(
+                        interpolation_ratio*(start-end))
 
                     if not check_state_validity_fn(interpolated_point):
                         return False
 
                 return True
 
-            return checkEdgeCollisionFree(start, end, 0.5 ) and checkEdgeCollisionFree(end, start, 0.5)
+            return (checkEdgeCollisionFree(start, end, 0.5)
+                    and checkEdgeCollisionFree(end, start, 0.5))
 
         roadmap = Graph()
 
-        GrowRoadMap(roadmap, state_sampling_fn, distance_fn, check_state_validity_fn,
-                    check_edge_validity_fn, roadmap_termination_fn, K, False, True, False)
-        # self.assertTrue(roadmap.CheckGraphLinkage())
+        GrowRoadMap(roadmap, state_sampling_fn, distance_fn,
+                    check_state_validity_fn, check_edge_validity_fn,
+                    roadmap_termination_fn, K, False, True, False)
+        self.assertTrue(roadmap.CheckGraphLinkage())
 
         UpdateRoadMapEdges(roadmap, check_edge_validity_fn, distance_fn, False)
-        # self.assertTrue(roadmap.CheckGraphLinkage())
+        self.assertTrue(roadmap.CheckGraphLinkage())
 
-        nodes_to_prune = {10,20,30,40,50,60}
+        nodes_to_prune = {10, 20, 30, 40, 50, 60}
         serial_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, False)
-        # self.assertTrue(serial_pruned_roadmap.CheckGraphLinkage())
+        self.assertTrue(serial_pruned_roadmap.CheckGraphLinkage())
 
-        # parallel_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, True)
-        # self.assertTrue(parallel_pruned_roadmap.CheckGraphLinkage())
+        parallel_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, True)
+        self.assertTrue(parallel_pruned_roadmap.CheckGraphLinkage())

@@ -54,7 +54,10 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
     py::class_<Class>(m, "SingleSolutionPlanningResults", "")
         .def("Path", &Class::Path, "")
         .def("Statistics", &Class::Statistics, "");
-  }7e48c94fa8f12e78d5c2bab5a89c47015f9cc3e8657e19e320ef9baa348cc488>,
+  }
+
+  m.def("MakeKinematicLinearRRTNearestNeighborsFunction",
+      &simple_rrt_planner::MakeKinematicLinearRRTNearestNeighborsFunction<T>,
       py::arg("distance_fn"), py::arg("use_parallel") = true, "");
 
   m.def("MakeRRTTimeoutTerminationFunction",
@@ -102,9 +105,11 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
         .def(py::init<const std::vector<simple_graph::GraphNode<T>,
                  Eigen::aligned_allocator<simple_graph::GraphNode<T>>>&>(),
             py::arg("nodes"), "")
-        .def("MakePrunedCopy", &Class::MakePrunedCopy, py::arg("nodes_to_prune"), py::arg("use_parallel"), "") 
-        //.def("CheckGraphLinkage", &Class::CheckGraphLinkage, "") 
-        .def("GetNodesImmutable", &Class::GetNodesImmutable, ""); 
+        .def("MakePrunedCopy", &Class::MakePrunedCopy,
+            py::arg("nodes_to_prune"), py::arg("use_parallel"), "")
+        .def("CheckGraphLinkage",
+            overload_cast_explicit<bool>(&Class::CheckGraphLinkage), "")
+        .def("GetNodesImmutable", &Class::GetNodesImmutable, "");
   }
 
   // PRM
