@@ -95,7 +95,7 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
   }
  
 
-  // Simple graph for PRM
+  // Simple Graph
   {
     using Class = simple_graph::GraphEdge;
     py::class_<Class>(m, "GraphEdge", "")
@@ -104,7 +104,9 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
             py::arg("to_index"), py::arg("weight"), "")
         .def(py::init<const int64_t, int64_t, double, uint64_t>(),
             py::arg("from_index"), py::arg("to_index"), py::arg("weight"),
-            py::arg("scratchpad"), "");
+            py::arg("scratchpad"), "") 
+        .def("GetFromIndex", &Class::GetFromIndex, "") 
+        .def("GetToIndex", &Class::GetToIndex, "");
   }
   {
     using Class = simple_graph::GraphNode<T>;
@@ -113,7 +115,9 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
         .def(py::init<const T&, std::vector<simple_graph::GraphEdge>&,
                  std::vector<simple_graph::GraphEdge>&>(),
             py::arg("value"), py::arg("new_in_edges"), py::arg("new_out_edges"),
-            "");
+            "")
+        .def("GetOutEdgesImmutable", &Class::GetOutEdgesImmutable, "") 
+        .def("GetValueImmutable", &Class::GetValueImmutable, "");
   }
 
   {
@@ -128,7 +132,8 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
             py::arg("nodes_to_prune"), py::arg("use_parallel"), "")
         .def("CheckGraphLinkage",
             overload_cast_explicit<bool>(&Class::CheckGraphLinkage), "")
-        .def("GetNodesImmutable", &Class::GetNodesImmutable, "");
+        .def("GetNodesImmutable", &Class::GetNodesImmutable, "")
+        .def("GetNodeImmutable", &Class::GetNodeImmutable, py::arg("index"), "");
   }
 
   // PRM
