@@ -6,6 +6,8 @@
 #include <common_robotics_utilities/simple_graph.hpp>
 #include <common_robotics_utilities/simple_prm_planner.hpp>
 #include <common_robotics_utilities/simple_rrt_planner.hpp>
+#include <common_robotics_utilities/simple_astar_search.hpp>
+#include <common_robotics_utilities/path_processing.hpp>
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -75,6 +77,23 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
       py::arg("forward_propagation_fn"), py::arg("state_added_callback_fn"),
       py::arg("check_goal_reached_fn"), py::arg("goal_reached_callback_fn"),
       py::arg("termination_check_fn"), "");
+
+  //Path Processing
+  m.def("ResamplePath", &path_processing::ResamplePath<T>,
+      py::arg("path"), py::arg("resampled_state_distance"), py::arg("state_distance_fn"),
+      py::arg("state_interpolation_fn"), "");
+
+  //Simple Astar Search
+  {
+    using Class = simple_astar_search::AstarResult<T>;
+    py::class_<Class>(m, "AstarResult", "")
+        .def(py::init<>(), "")
+        .def(py::init<const std::vector<T>&, const double>(),
+            py::arg("path"), py::arg("path_cost"), "") 
+        .def("Path", &Class::Path, "") 
+        .def("PathCost", &Class::PathCost, "");
+  }
+ 
 
   // Simple graph for PRM
   {
