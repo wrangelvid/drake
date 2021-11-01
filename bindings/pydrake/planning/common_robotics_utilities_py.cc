@@ -3,14 +3,15 @@
 #include "pybind11/operators.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
+// #include <common_robotics_utilities/path_processing.hpp>
+#include <common_robotics_utilities/simple_astar_search.hpp>
 #include <common_robotics_utilities/simple_graph.hpp>
 #include <common_robotics_utilities/simple_prm_planner.hpp>
 #include <common_robotics_utilities/simple_rrt_planner.hpp>
-#include <common_robotics_utilities/simple_astar_search.hpp>
-#include <common_robotics_utilities/path_processing.hpp>
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
+#include "drake/common/random.h"
 
 namespace drake {
 namespace pydrake {
@@ -19,6 +20,7 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
   // NOLINTNEXTLINE(build/namespaces): Emulate placement in namespace.
   using namespace common_robotics_utilities;
 
+  using RNG = RandomGenerator;
   using T = Eigen::VectorXd;
 
   py::module::import("pydrake.common");
@@ -33,7 +35,16 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
         .def(py::init<const T&, const int64_t, const std::vector<int64_t>&>(),
             py::arg("value"), py::arg("parent_index"), py::arg("child_indices"),
             "")
-        .def("GetParentIndex", &Class::GetParentIndex, "");
+        .def("GetValueImmutable", &Class::GetValueImmutable, "")
+        .def("GetValueMutable", &Class::GetValueMutable, "")
+        .def("GetParentIndex", &Class::GetParentIndex, "")
+        .def("SetParentIndex", &Class::SetParentIndex, py::arg("parent_index"),
+            "")
+        .def("GetChildIndices", &Class::GetChildIndices, "")
+        .def("ClearChildIndicies", &Class::ClearChildIndicies, "")
+        .def("AddChildIndex", &Class::AddChildIndex, py::arg("child_index"), "")
+        .def("RemoveChildIndex", &Class::RemoveChildIndex,
+            py::arg("child_index"), "");
   }
 
   {
@@ -41,7 +52,11 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
     py::class_<Class>(m, "PropagatedState", "")
         .def(py::init<const T&, const int64_t>(), py::arg("state"),
             py::arg("relative_parent_index"), "")
-        .def("State", &Class::State, "");
+        .def("State", &Class::State, "")
+        .def("MutableState", &Class::MutableState, "")
+        .def("RelativeParentIndex", &Class::RelativeParentIndex, "")
+        .def("SetRelativeParentIndex", &Class::SetRelativeParentIndex,
+            py::arg("relative_parent_index"), "");
   }
 
   {
@@ -62,8 +77,16 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
       &simple_rrt_planner::MakeKinematicLinearRRTNearestNeighborsFunction<T>,
       py::arg("distance_fn"), py::arg("use_parallel") = true, "");
 
+  m.def("MakeKinematicLinearBiRRTNearestNeighborsFunction",
+      &simple_rrt_planner::MakeKinematicLinearBiRRTNearestNeighborsFunction<T>,
+      py::arg("distance_fn"), py::arg("use_parallel") = true, "");
+
   m.def("MakeRRTTimeoutTerminationFunction",
       &simple_rrt_planner::MakeRRTTimeoutTerminationFunction,
+      py::arg("planning_timeout"), "");
+
+  m.def("MakeBiRRTTimeoutTerminationFunction",
+      &simple_rrt_planner::MakeBiRRTTimeoutTerminationFunction,
       py::arg("planning_timeout"), "");
 
   m.def("RRTPlanMultiPath", &simple_rrt_planner::RRTPlanMultiPath<T>,
@@ -78,22 +101,37 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
       py::arg("check_goal_reached_fn"), py::arg("goal_reached_callback_fn"),
       py::arg("termination_check_fn"), "");
 
-  //Path Processing
-  m.def("ResamplePath", &path_processing::ResamplePath<T>,
-      py::arg("path"), py::arg("resampled_state_distance"), py::arg("state_distance_fn"),
-      py::arg("state_interpolation_fn"), "");
+  m.def("BiRRTPlanMultiPath", &simple_rrt_planner::BiRRTPlanMultiPath<RNG, T>,
+      py::arg("start_tree"), py::arg("goal_tree"), py::arg("state_sampling_fn"),
+      py::arg("nearest_neighbor_fn"), py::arg("propagation_fn"),
+      py::arg("state_added_callback_fn"), py::arg("states_connected_fn"),
+      py::arg("goal_bridge_callback_fn"), py::arg("tree_sampling_bias"),
+      py::arg("p_switch_tree"), py::arg("termination_check_fn"), py::arg("rng"),
+      "");
 
-  //Simple Astar Search
+  m.def("BiRRTPlanSinglePath", &simple_rrt_planner::BiRRTPlanSinglePath<RNG, T>,
+      py::arg("start_tree"), py::arg("goal_tree"), py::arg("state_sampling_fn"),
+      py::arg("nearest_neighbor_fn"), py::arg("propagation_fn"),
+      py::arg("state_added_callback_fn"), py::arg("states_connected_fn"),
+      py::arg("goal_bridge_callback_fn"), py::arg("tree_sampling_bias"),
+      py::arg("p_switch_tree"), py::arg("termination_check_fn"), py::arg("rng"),
+      "");
+
+  // // Path Processing
+  // m.def("ResamplePath", &path_processing::ResamplePath<T>, py::arg("path"),
+  //     py::arg("resampled_state_distance"), py::arg("state_distance_fn"),
+  //     py::arg("state_interpolation_fn"), "");
+
+  // Simple Astar Search
   {
     using Class = simple_astar_search::AstarResult<T>;
     py::class_<Class>(m, "AstarResult", "")
         .def(py::init<>(), "")
-        .def(py::init<const std::vector<T>&, const double>(),
-            py::arg("path"), py::arg("path_cost"), "") 
-        .def("Path", &Class::Path, "") 
+        .def(py::init<const std::vector<T>&, const double>(), py::arg("path"),
+            py::arg("path_cost"), "")
+        .def("Path", &Class::Path, "")
         .def("PathCost", &Class::PathCost, "");
   }
- 
 
   // Simple Graph
   {
@@ -104,8 +142,8 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
             py::arg("to_index"), py::arg("weight"), "")
         .def(py::init<const int64_t, int64_t, double, uint64_t>(),
             py::arg("from_index"), py::arg("to_index"), py::arg("weight"),
-            py::arg("scratchpad"), "") 
-        .def("GetFromIndex", &Class::GetFromIndex, "") 
+            py::arg("scratchpad"), "")
+        .def("GetFromIndex", &Class::GetFromIndex, "")
         .def("GetToIndex", &Class::GetToIndex, "");
   }
   {
@@ -116,7 +154,7 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
                  std::vector<simple_graph::GraphEdge>&>(),
             py::arg("value"), py::arg("new_in_edges"), py::arg("new_out_edges"),
             "")
-        .def("GetOutEdgesImmutable", &Class::GetOutEdgesImmutable, "") 
+        .def("GetOutEdgesImmutable", &Class::GetOutEdgesImmutable, "")
         .def("GetValueImmutable", &Class::GetValueImmutable, "");
   }
 
@@ -133,7 +171,8 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
         .def("CheckGraphLinkage",
             overload_cast_explicit<bool>(&Class::CheckGraphLinkage), "")
         .def("GetNodesImmutable", &Class::GetNodesImmutable, "")
-        .def("GetNodeImmutable", &Class::GetNodeImmutable, py::arg("index"), "");
+        .def(
+            "GetNodeImmutable", &Class::GetNodeImmutable, py::arg("index"), "");
   }
 
   // PRM
