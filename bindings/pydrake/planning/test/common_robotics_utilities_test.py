@@ -232,7 +232,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
                 for step in range(int(num_steps)+1):
                     interpolation_ratio = step / num_steps
                     interpolated_point = start + np.round(
-                        interpolation_ratio*(start-end))
+                        interpolation_ratio*(end-start))
 
                     if not check_state_validity_fn(interpolated_point):
                         return False
@@ -283,19 +283,21 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
 
         def drawPath(env, starts, goals, path):
             tmp_env = env.copy()
-            if len(path) > 0:
-                setCell(tmp_env, path[0], '+')
+            # if len(path) > 0:
+            #     setCell(tmp_env, path[0], '+')
 
-                for previous, current in zip(path[:-1], path[1:]):
-                    edge_path = ResamplePoints([previous, current])
+            #     for previous, current in zip(path[:-1], path[1:]):
+            #         edge_path = ResamplePoints([previous, current])
 
-                    for point in edge_path:
-                        current_val = getCell(tmp_env, point)
-                        if current_val != '+':
-                            setCell(tmp_env, point, '-')
+            #         for point in edge_path:
+            #             current_val = getCell(tmp_env, point)
+            #             if current_val != '+':
+            #                 setCell(tmp_env, point, '-')
 
-                    setCell(tmp_env, current, '+')
+            #         setCell(tmp_env, current, '+')
 
+            for p in path:
+                setCell(tmp_env, p, '+')
             for start in starts:
                 setCell(tmp_env, start, 'S')
             for goal in goals:
@@ -306,7 +308,7 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
         def check_path(path):
             self.assertTrue(len(path) >= 2)
 
-            for idx in range(len(path)):
+            for idx in range(1, len(path)):
                 # We check both forward and backward because rounding in the
                 # waypoint interpolation can create edges that are valid in
                 # only one direction.
@@ -368,13 +370,13 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
                                  distance_is_symmetric=True,
                                  add_duplicate_states=False,
                                  limit_astar_pqueue_duplicates=True).Path()
-                print(path)
                 checkPlan([start], [goal], path)
 
                 print(f"Lazy-PRM Path ({start} to {goal})")
 
                 lazy_path = LazyQueryPath(
-                    [start], [goal], roadmap, distance_fn, use_parallel=False,
+                    [start], [goal], roadmap, distance_fn,
+                    check_edge_validity_fn, K, use_parallel=False,
                     distance_is_symmetric=True, add_duplicate_states=False,
                     limit_astar_pqueue_duplicates=True).Path()
 
@@ -390,4 +392,3 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
                                limit_astar_pqueue_duplicates=True).Path()
 
         checkPlan(starts, goals, multi_path)
-        # self.assertTrue(False)

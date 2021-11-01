@@ -144,18 +144,39 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
             py::arg("from_index"), py::arg("to_index"), py::arg("weight"),
             py::arg("scratchpad"), "")
         .def("GetFromIndex", &Class::GetFromIndex, "")
-        .def("GetToIndex", &Class::GetToIndex, "");
+        .def("GetToIndex", &Class::GetToIndex, "")
+        .def("GetWeight", &Class::GetWeight, "")
+        .def("GetScratchpad", &Class::GetScratchpad, "")
+        .def(
+            "SetFromIndex", &Class::SetFromIndex, py::arg("new_from_index"), "")
+        .def("SetToIndex", &Class::SetToIndex, py::arg("new_to_index"), "")
+        .def("SetWeight", &Class::SetWeight, py::arg("new_weight"), "")
+        .def("SetScratchpad", &Class::SetScratchpad, py::arg("new_scratchpad"),
+            "")
+        .def("__str__", &Class::Print);
   }
   {
     using Class = simple_graph::GraphNode<T>;
     py::class_<Class>(m, "GraphNode", "")
         .def(py::init<>(), "")
+        .def(py::init<const T&>(), py::arg("value"), "")
         .def(py::init<const T&, std::vector<simple_graph::GraphEdge>&,
                  std::vector<simple_graph::GraphEdge>&>(),
             py::arg("value"), py::arg("new_in_edges"), py::arg("new_out_edges"),
             "")
+        .def("GetValueImmutable", &Class::GetValueImmutable, "")
+        .def("GetValueMutable", &Class::GetValueMutable, "")
+        .def("AddInEdge", &Class::AddInEdge, py::arg("new_in_edge"), "")
+        .def("AddOutEdge", &Class::AddOutEdge, py::arg("new_out_edge"), "")
+        .def("AddEdgePair", &Class::AddEdgePair, py::arg("new_in_edge"),
+            py::arg("new_out_edge"), "")
+        .def("GetInEdgesImmutable", &Class::GetInEdgesImmutable, "")
+        .def("GetInEdgesMutable", &Class::GetInEdgesMutable, "")
         .def("GetOutEdgesImmutable", &Class::GetOutEdgesImmutable, "")
-        .def("GetValueImmutable", &Class::GetValueImmutable, "");
+        .def("GetOutEdgesMutable", &Class::GetOutEdgesMutable, "")
+        .def("SetInEdges", &Class::SetInEdges, py::arg("new_in_edges"), "")
+        .def("SetOutEdges", &Class::SetOutEdges, py::arg("new_out_edges"), "")
+        .def("__str__", &Class::Print);
   }
 
   {
@@ -168,11 +189,23 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
             py::arg("nodes"), "")
         .def("MakePrunedCopy", &Class::MakePrunedCopy,
             py::arg("nodes_to_prune"), py::arg("use_parallel"), "")
+        .def("Size", &Class::Size, "")
+        .def("IndexInRange", &Class::IndexInRange, py::arg("index"), "")
         .def("CheckGraphLinkage",
             overload_cast_explicit<bool>(&Class::CheckGraphLinkage), "")
         .def("GetNodesImmutable", &Class::GetNodesImmutable, "")
-        .def(
-            "GetNodeImmutable", &Class::GetNodeImmutable, py::arg("index"), "");
+        .def("GetNodesMutable", &Class::GetNodesMutable, "")
+        .def("GetNodeImmutable", &Class::GetNodeImmutable, py::arg("index"), "")
+        .def("AddNode",
+            py::overload_cast<const simple_graph::GraphNode<T>&>(
+                &Class::AddNode),
+            py::arg("new_node"), "")
+        .def("AddNode", py::overload_cast<const T&>(&Class::AddNode),
+            py::arg("new_value"), "")
+        .def("AddEdgeBetweenNodes", &Class::AddEdgeBetweenNodes,
+            py::arg("from_index"), py::arg("to_index"), py::arg("edge_weight"),
+            "")
+        .def("__str__", &Class::Print);
   }
 
   // PRM
