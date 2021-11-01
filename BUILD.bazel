@@ -51,6 +51,7 @@ install(
         "//geometry:install",
         "//lcmtypes:install",
         "//manipulation/models:install_data",
+        "//planning:install",
         "//setup:install",
         "//third_party/com_github_finetjul_bender:install",
         "//third_party/com_github_jbeder_yaml_cpp:install",

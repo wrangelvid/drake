@@ -1,0 +1,8 @@
+# -*- python -*-
+
+load("//tools/install:install_data.bzl", "install_data")
+load("//tools/lint:lint.bzl", "add_lint_tests")
+
+install_data(extra_prod_models=glob(["**/*.yaml"]))
+
+add_lint_tests()

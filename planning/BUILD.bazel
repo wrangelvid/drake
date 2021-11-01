@@ -1,0 +1,27 @@
+# -*- python -*-
+
+load("//tools/install:install.bzl", "install")
+load("//tools/jupyter:jupyter_py.bzl", "drake_jupyter_py_binary")
+load("//tools/lint:lint.bzl", "add_lint_tests")
+
+drake_jupyter_py_binary(
+    name = "view_models",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//planning/models:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+    ],
+)
+
+install(
+    name = "install_data",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//planning/models:install_data",
+    ],
+)
+
+add_lint_tests()
