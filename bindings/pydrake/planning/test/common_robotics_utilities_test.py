@@ -347,15 +347,9 @@ class TestCommonRoboticsUtilities(unittest.TestCase):
         UpdateRoadMapEdges(roadmap, check_edge_validity_fn, distance_fn, False)
         self.assertTrue(roadmap.CheckGraphLinkage())
 
-<<<<<<< HEAD
-        nodes_to_prune = [10,20,30,40,50,60]
-        # serial_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, False)
-        # self.assertTrue(serial_pruned_roadmap.CheckGraphLinkage())
-=======
         nodes_to_prune = {10, 20, 30, 40, 50, 60}
         serial_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, False)
         self.assertTrue(serial_pruned_roadmap.CheckGraphLinkage())
->>>>>>> f33bd5089... Fix CheckGraphLinkage binding
 
         parallel_pruned_roadmap = roadmap.MakePrunedCopy(nodes_to_prune, True)
         self.assertTrue(parallel_pruned_roadmap.CheckGraphLinkage())
