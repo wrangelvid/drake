@@ -223,27 +223,6 @@ drake_pybind_library(
 )
 
 drake_cc_library(
-    name = "rational_function_types_pybind",
-    hdrs = ["rational_function_types_pybind.h"],
-    declare_installed_headers = 0,
-    visibility = ["//visibility:public"],
-    deps = ["//:drake_shared_library"],
-)
-
-drake_pybind_library(
-    name = "rational_function_py",
-    cc_deps = [
-        ":rational_function_types_pybind",
-        "//bindings/pydrake:documentation_pybind",
-    ],
-    cc_srcs = ["rational_function_py.cc"],
-    package_info = PACKAGE_INFO,
-    py_deps = [
-        ":module_py",
-    ],
-)
-
-drake_cc_library(
     name = "symbolic_types_pybind",
     hdrs = ["symbolic_types_pybind.h"],
     declare_installed_headers = 0,
@@ -305,7 +284,6 @@ PY_LIBRARIES_WITH_INSTALL = [
     ":math_py",
     ":perception_py",
     ":polynomial_py",
-    ":rational_function_py",
     ":symbolic_py",
     ":trajectories_py",
     "//bindings/pydrake/visualization",

@@ -871,8 +871,13 @@ PYBIND11_MODULE(symbolic, m) {
       .def("DecomposeLumpedParameters", &DecomposeLumpedParameters,
           py::arg("f"), py::arg("parameters"),
           doc.DecomposeLumpedParameters.doc);
-
   // NOLINTNEXTLINE(readability/fn_size)
+
+  // BEGIN AMICE EDITS notice that we don't attempt to build docs
+  py::class_<RationalFunction> rat_fun_cls(m, "RationalFunction", doc.RationalFunction.doc);
+  rat_fun_cls.def(py::init<>(), doc.RationalFunction.ctor.doc_0args)
+        .def(py::init<Polynomial, Polynomial>())
+        .def(py::init<const Polynomial&>());
 }
 }  // namespace pydrake
 }  // namespace drake
