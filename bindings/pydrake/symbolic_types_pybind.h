@@ -18,6 +18,7 @@ PYBIND11_NUMPY_OBJECT_DTYPE(drake::symbolic::Formula);
 PYBIND11_NUMPY_OBJECT_DTYPE(drake::symbolic::Monomial);
 PYBIND11_NUMPY_OBJECT_DTYPE(drake::symbolic::Polynomial);
 PYBIND11_NUMPY_OBJECT_DTYPE(drake::symbolic::Variable);
+PYBIND11_NUMPY_OBJECT_DTYPE(drake::symbolic::RationalFunction);
 
 namespace drake {
 namespace pydrake {
