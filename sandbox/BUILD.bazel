@@ -56,7 +56,18 @@ drake_jupyter_py_binary(
         "//sandbox:models",
     ],
     deps = [
-        #        ":manipulation",
+        "//bindings/pydrake",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "rational_func_test",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
         "//bindings/pydrake",
     ],
 )
