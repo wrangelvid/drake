@@ -877,7 +877,26 @@ PYBIND11_MODULE(symbolic, m) {
   py::class_<RationalFunction> rat_fun_cls(m, "RationalFunction", doc.RationalFunction.doc);
   rat_fun_cls.def(py::init<>(), doc.RationalFunction.ctor.doc_0args)
         .def(py::init<Polynomial, Polynomial>())
-        .def(py::init<const Polynomial&>());
+        .def(py::init<const Polynomial&>())
+        .def(py::init<double>())
+        .def("numerator", &RationalFunction::numerator)
+        .def("denominator", &RationalFunction::denominator)
+        .def("__str__",
+             [](const RationalFunction& self) { return fmt::format("{}", self); })
+        // Arithmetic
+        .def(-py::self)
+        .def(py::self + py::self)
+        .def(py::self + double())
+        .def(double() + py::self)
+        .def(py::self - py::self)
+        .def(py::self - double())
+        .def(double() - py::self)
+        .def(py::self * py::self)
+        .def(py::self * double())
+        .def(double() * py::self)
+        .def(py::self / double())
+        // Logical comparison
+        .def(py::self == py::self);
 }
 }  // namespace pydrake
 }  // namespace drake
