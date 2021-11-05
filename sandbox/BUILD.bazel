@@ -38,15 +38,15 @@ drake_jupyter_py_binary(
         "//bindings/pydrake",
     ],
 )
+
 #
-#drake_py_library(
-#    name = "manipulation",
-#    srcs = [
-#        "manipulation_scenarios.py",
-#        "manipulation_utils.py",
-#    ],
-#    visibility = ["//visibility:public"],
-#)
+drake_py_library(
+    name = "symbolic_parsing_helpers",
+    srcs = [
+        "symbolic_parsing_helpers.py",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 drake_jupyter_py_binary(
     name = "iris_test_amice",
@@ -57,6 +57,7 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
     ],
 )
 

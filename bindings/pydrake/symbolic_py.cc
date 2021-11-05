@@ -888,13 +888,24 @@ PYBIND11_MODULE(symbolic, m) {
         .def(py::self + py::self)
         .def(py::self + double())
         .def(double() + py::self)
+        .def(py::self + Polynomial())
+        .def(Polynomial() + py::self)
+
         .def(py::self - py::self)
         .def(py::self - double())
         .def(double() - py::self)
+        .def(py::self - Polynomial())
+        .def(Polynomial() - py::self)
         .def(py::self * py::self)
         .def(py::self * double())
         .def(double() * py::self)
+        .def(py::self * Polynomial())
+        .def(Polynomial() * py::self)
+        .def(py::self / py::self)
         .def(py::self / double())
+        .def(double() / py::self)
+        .def(py::self / Polynomial())
+        .def(Polynomial() / py::self)
         // Logical comparison
         .def(py::self == py::self);
 }
