@@ -39,6 +39,15 @@
     </inertial>
   </link>
 
+  <joint name="joint1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.5707" upper="1.5707"/> 
+    <parent link="base"/>
+    <child link="link1"/>
+  </joint>
+  
+  <!-- visual only -->
   <link name="link1viz">
     <visual>
       <origin xyz="0 0 0.6" rpy="0 0 0"/>
@@ -55,17 +64,12 @@
     <child link="link1viz"/>
   </joint>
 
-  <joint name="joint1" type="revolute">
-    <origin rpy="0 0 0" xyz="0 -1.5 0.0"/>
-    <axis xyz="1 0 0"/>
-    <limit lower="-1.5707" upper="1.5707"/> 
-    <parent link="base"/>
-    <child link="link1"/>
-  </joint>
+  
 
+  <!--
   <collision_filter_group name="dyncolgroup">  
     <member link="link1"/>
   </collision_filter_group>
-  
+  -->
   
 </robot>

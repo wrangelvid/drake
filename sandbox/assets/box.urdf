@@ -84,30 +84,28 @@
     </visual>
   </link>
 
-  <joint name="joint4" type="fixed">
+  <joint name="joint1" type="fixed">
     <origin rpy="1.5707 0 0" xyz="0 -0.75 -0.05"/>
     <parent link="base"/>
     <child link="box1"/>
   </joint>
 
-  <joint name="joint5" type="fixed">
+  <joint name="joint2" type="fixed">
     <origin rpy="0 0 0" xyz="0 0.2 1.0"/>
     <parent link="base"/>
     <child link="box2"/>
   </joint>
 
-  <joint name="joint6" type="fixed">
+  <joint name="joint3" type="fixed">
     <origin rpy="1.5707 0 0" xyz="0 -0.75 2.0"/>
     <parent link="base"/>
     <child link="box3"/>
   </joint>
 
-  <joint name="joint7" type="fixed">
+  <joint name="joint4" type="fixed">
     <origin rpy="0 0 0" xyz="0 -1.7 1.0"/>
     <parent link="base"/>
     <child link="box4"/>
   </joint>
   
-
-
 </robot>
