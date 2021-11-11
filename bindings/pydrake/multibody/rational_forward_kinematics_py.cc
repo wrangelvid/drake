@@ -10,13 +10,34 @@
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
+#include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics.h"
-//#include "drake/multibody/inverse_kinematics/unit_quaternion_constraint.h"
+#include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 
 namespace drake {
-    namespace pydrake {
+namespace pydrake {
 
-PYBIND11_MODULE(inverse_kinematics, m) {
+template <typename T>
+void DoPoseDeclaration(py::module m, T)    {
+    using namespace drake::multibody;
+    py::tuple param = GetPyParam<T>();
+    using Class = RationalForwardKinematics::Pose<T>;
+    auto cls = DefineTemplateClassWithDefault<Class>(m, "RationalForwardKinematicsPose", param);
+//    py::class_<Class>(m, "Pose")
+    cls
+        .def_readwrite("p_AB", &RationalForwardKinematics::Pose<T>::p_AB)
+        .def_readwrite("R_AB", &RationalForwardKinematics::Pose<T>::R_AB)
+        .def_readwrite(
+            "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
+        .def_readwrite(
+            "dummy", &RationalForwardKinematics::Pose<T>::dummy);
+    DefCopyAndDeepCopy(&cls);
+//    AddValueInstantiation<Class>(m);
+//    AddValueInstantiation<std::vector<Class>>(m);
+//    AddValueInstantiation<RationalForwardKinematics::Pose>(m);
+  }
+
+PYBIND11_MODULE(rational_forward_kinematics, m) {
   // NOLINTNEXTLINE(build/namespaces): Emulate placement in namespace.
   using namespace drake::multibody;
 //  constexpr auto& doc = pydrake_doc.drake.multibody;
@@ -24,6 +45,7 @@ PYBIND11_MODULE(inverse_kinematics, m) {
 
   py::module::import("pydrake.math");
   py::module::import("pydrake.multibody.plant");
+  //RationalForwardKinematics Class
   {
     using Class = RationalForwardKinematics;
     // no class docs built
@@ -61,10 +83,23 @@ PYBIND11_MODULE(inverse_kinematics, m) {
                      py::arg("start"),
                      py::arg("end")
                      //             cls_doc.CalcLinkPoses
-                     )
+                     );
+  }//RationalForwardKinematics Class
+  //RationalForwardKinematics Util methods
+    {
+//      constexpr auto& cls_doc = doc.rational_forward_kinematics.generate_monomial_basis;
+        m.def("GenerateMonomialBasisWithOrderUpToOne", &GenerateMonomialBasisWithOrderUpToOne, py::arg("t_angles"));
+        m.def("GenerateMonomialBasisOrderAllUpToOneExceptOneUpToTwo",
+              &GenerateMonomialBasisOrderAllUpToOneExceptOneUpToTwo, py::arg("t_angles"));
+    }//RationalForwardKinematics Util methods
 
-        ;
-  }
+//  type_visit([m](auto dummy) { DoPoseDeclaration(m, dummy); },
+//      CommonScalarPack{});
+  type_pack<symbolic::Polynomial, symbolic::RationalFunction> sym_pack;
+  type_visit([m](auto dummy) { DoPoseDeclaration(m, dummy); },
+      sym_pack);
 }
-    }//pydrake
+//Pose
+
+}//pydrake
 }//drake
