@@ -3,8 +3,6 @@
  pydrake.geometry.optimization module. */
 
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
-#include "drake/bindings/pydrake/common/identifier_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/geometry_py.h"
 #include "drake/geometry/optimization/bspline_graph_of_convex_sets.h"
@@ -40,8 +38,6 @@ void DefineGeometryOptimization(py::module m) {
             cls_doc.Clone.doc)
         .def("ambient_dimension", &ConvexSet::ambient_dimension,
             cls_doc.ambient_dimension.doc)
-        .def("IntersectsWith", &ConvexSet::IntersectsWith, py::arg("other"),
-            cls_doc.IntersectsWith.doc)
         .def("IsBounded", &ConvexSet::IsBounded, cls_doc.IsBounded.doc)
         .def("PointInSet", &ConvexSet::PointInSet, py::arg("x"),
             py::arg("tol") = 1e-8, cls_doc.PointInSet.doc)
@@ -106,10 +102,6 @@ void DefineGeometryOptimization(py::module m) {
             cls_doc.MaximumVolumeInscribedEllipsoid.doc)
         .def("ChebyshevCenter", &HPolyhedron::ChebyshevCenter,
             cls_doc.ChebyshevCenter.doc)
-        .def("CartesianProduct", &HPolyhedron::CartesianProduct,
-            py::arg("other"), cls_doc.CartesianProduct.doc)
-        .def("CartesianPower", &HPolyhedron::CartesianPower, py::arg("n"),
-            cls_doc.CartesianPower.doc)
         .def_static("MakeBox", &HPolyhedron::MakeBox, py::arg("lb"),
             py::arg("ub"), cls_doc.MakeBox.doc)
         .def_static("MakeUnitBox", &HPolyhedron::MakeUnitBox, py::arg("dim"),
