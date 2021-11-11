@@ -7,7 +7,6 @@
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -201,8 +200,18 @@ class GraphOfConvexSets {
     void ClearPhiConstraints();
 
     /** Returns the sum of the costs associated with this edge in a
-    MathematicalProgramResult. */
+    solvers::MathematicalProgramResult. */
     double GetSolutionCost(
+        const solvers::MathematicalProgramResult& result) const;
+
+    /** Returns the vector value of the slack variables associated with ϕxᵤ in a
+    solvers::MathematicalProgramResult. */
+    Eigen::VectorXd GetSolutionPhiXu(
+        const solvers::MathematicalProgramResult& result) const;
+
+    /** Returns the vector value of the slack variables associated with ϕxᵥ in
+    a solvers::MathematicalProgramResult. */
+    Eigen::VectorXd GetSolutionPhiXv(
         const solvers::MathematicalProgramResult& result) const;
 
    private:
@@ -226,7 +235,7 @@ class GraphOfConvexSets {
     // Note: ell_[i] is associated with costs_[i].
     solvers::VectorXDecisionVariable ell_{};
     std::vector<solvers::Binding<solvers::Cost>> costs_{};
-    std::unordered_set<solvers::Binding<solvers::Constraint>> constraints_{};
+    std::vector<solvers::Binding<solvers::Constraint>> constraints_{};
     std::optional<bool> phi_value_{};
 
     friend class GraphOfConvexSets;
@@ -254,16 +263,35 @@ class GraphOfConvexSets {
   */
   Edge* AddEdge(const Vertex& u, const Vertex& v, std::string name = "");
 
-  /** Returns the VertexIds of the vertices stored in the graph.  Note that the
-  order of the elements is not guaranteed. */
-  std::unordered_set<VertexId> VertexIds() const;
+  /** Returns mutable pointers to the vertices stored in the graph. */
+  std::vector<Vertex*> Vertices();
 
-  /** Returns pointers to the edges stored in the graph.  Note that the order of
-  the elements is not guaranteed. */
-  std::unordered_set<Edge*> Edges();
+  /** Returns pointers to the vertices stored in the graph.
+  @exclude_from_pydrake_mkdoc{This overload is not bound in pydrake.} */
+  std::vector<const Vertex*> Vertices() const;
 
-  // TODO(russt): std::string GetGraphvizString(const
-  // std::optional<solvers::MathematicalProgramResult>& = std::nullopt) const;
+  /** Returns mutable pointers to the edges stored in the graph. */
+  std::vector<Edge*> Edges();
+
+  /** Returns pointers to the edges stored in the graph.
+  @exclude_from_pydrake_mkdoc{This overload is not bound in pydrake.} */
+  std::vector<const Edge*> Edges() const;
+
+  /** Returns a Graphviz string describing the graph vertices and edges.  If
+  `results` is supplied, then the graph will be annotated with the solution
+  values.
+  @param show_slacks determines whether the values of the intermediate
+  (slack) variables are also displayed in the graph.
+  @param precision sets the floating point precision (how many digits are
+  generated) of the annotations.
+  @param scientific sets the floating point formatting to scientific (if true)
+  or fixed (if false).
+  */
+  std::string GetGraphvizString(
+      const std::optional<solvers::MathematicalProgramResult>& result =
+          std::nullopt,
+      bool show_slacks = true, int precision = 3,
+      bool scientific = false) const;
 
   // TODO(russt): Consider adding optional<Solver> argument.
   /** Formulates and solves the mixed-integer convex formulation of the
