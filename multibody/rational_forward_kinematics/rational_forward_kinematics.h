@@ -38,9 +38,13 @@ class RationalForwardKinematics {
 
   template <typename T>
   struct Pose {
-    drake::Vector3<T> p_AB;
-    drake::Matrix3<T> R_AB;
+//    drake::Vector3<T> p_AB;
+      Eigen::Matrix<T,3,1> p_AB;
+//    drake::Matrix3<T> R_AB;
+      Eigen::Matrix<T,3,3> R_AB;
+
     drake::multibody::BodyIndex frame_A_index;
+    T dummy;
   };
 
   struct LinkPoints {

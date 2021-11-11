@@ -5,14 +5,13 @@
 #include "pybind11/pybind11.h"
 
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/sorted_pair_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 
-#include "drake/bindings/pydrake/documentation_pybind.h"
-#include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
+
+
 
 namespace drake {
 namespace pydrake {
@@ -25,12 +24,15 @@ void DoPoseDeclaration(py::module m, T)    {
     auto cls = DefineTemplateClassWithDefault<Class>(m, "RationalForwardKinematicsPose", param);
 //    py::class_<Class>(m, "Pose")
     cls
-        .def_readwrite("p_AB", &RationalForwardKinematics::Pose<T>::p_AB)
-        .def_readwrite("R_AB", &RationalForwardKinematics::Pose<T>::R_AB)
+        .def("p_AB", [](const Class& self) {return self.p_AB;})
+        .def("R_AB", [](const Class& self) {return self.R_AB;})
+//        .def_readwrite("p_AB", &RationalForwardKinematics::Pose<T>::p_AB)
+//        .def_readwrite("R_AB", &RationalForwardKinematics::Pose<T>::R_AB)
         .def_readwrite(
             "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
         .def_readwrite(
             "dummy", &RationalForwardKinematics::Pose<T>::dummy);
+
     DefCopyAndDeepCopy(&cls);
 //    AddValueInstantiation<Class>(m);
 //    AddValueInstantiation<std::vector<Class>>(m);
