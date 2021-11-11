@@ -38,15 +38,15 @@ drake_jupyter_py_binary(
         "//bindings/pydrake",
     ],
 )
+
 #
-#drake_py_library(
-#    name = "manipulation",
-#    srcs = [
-#        "manipulation_scenarios.py",
-#        "manipulation_utils.py",
-#    ],
-#    visibility = ["//visibility:public"],
-#)
+drake_py_library(
+    name = "symbolic_parsing_helpers",
+    srcs = [
+        "symbolic_parsing_helpers.py",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 drake_jupyter_py_binary(
     name = "iris_test_amice",
@@ -56,7 +56,31 @@ drake_jupyter_py_binary(
         "//sandbox:models",
     ],
     deps = [
-        #        ":manipulation",
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "rational_func_test",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "trial_notebook",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
         "//bindings/pydrake",
     ],
 )
