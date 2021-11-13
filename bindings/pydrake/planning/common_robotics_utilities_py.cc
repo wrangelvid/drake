@@ -209,6 +209,12 @@ PYBIND11_MODULE(common_robotics_utilities, m) {
   }
 
   // PRM
+  {
+    using Class = simple_prm_planner::NNDistanceDirection;
+    py::class_<Class>(m, "NNDistanceDirection", "")
+        .def(py::init<>(), "");
+  }
+
   m.def("AddNodeToRoadmap", &simple_prm_planner::AddNodeToRoadmap<T>,
       py::arg("state"), py::arg("nn_distance_direction"), py::arg("roadmap"),
       py::arg("distance_fn"), py::arg("edge_validity_check_fn"), py::arg("K"),
