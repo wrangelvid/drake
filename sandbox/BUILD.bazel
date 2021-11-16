@@ -25,7 +25,8 @@ filegroup(
         "shelves.sdf",
         "assets/planar2dof.urdf",
         "assets/planar1dof.urdf",
-        "assets/box.urdf"
+        "assets/box.urdf",
+        "assets/doublerob.urdf"
     ],
     visibility = ["//visibility:public"],
 )
@@ -47,6 +48,14 @@ drake_py_library(
     name = "symbolic_parsing_helpers",
     srcs = [
         "symbolic_parsing_helpers.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+drake_py_library(
+    name = "meshcat_cpp_utils",
+    srcs = [
+        "meshcat_cpp_utils.py",
     ],
     visibility = ["//visibility:public"],
 )
@@ -85,5 +94,6 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
+        "//sandbox:meshcat_cpp_utils"
     ],
 )
