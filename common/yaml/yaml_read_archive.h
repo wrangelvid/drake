@@ -26,46 +26,8 @@
 namespace drake {
 namespace yaml {
 
-/// Loads data from a YAML file into a C++ structure, using the Serialize /
-/// Archive pattern.
-///
-/// Sample data:
-/// @code{yaml}
-/// doc:
-///   foo: 1.0
-///   bar: [2.0, 3.0]
-/// @endcode
-///
-/// Sample code:
-/// @code{cpp}
-/// struct MyData {
-///   double foo{NAN};
-///   std::vector<double> bar;
-///
-///   template <typename Archive>
-///   void Serialize(Archive* a) {
-///     a->Visit(DRAKE_NVP(foo));
-///     a->Visit(DRAKE_NVP(bar));
-///   }
-/// };
-///
-/// MyData LoadData(const std::string& filename) {
-///   MyData result;
-///   const YAML::Node& root = YAML::LoadFile(filename);
-///   common::YamlReadArchive(root).Accept(&result);
-///   return result;
-/// }
-/// @endcode
-///
-/// Structures can be arbitrarily nested, as long as each `struct` has a
-/// `Serialize` method.  Many common built-in types (int, double, std::string,
-/// std::vector, std::array, std::optional, std::variant, Eigen::Matrix) may
-/// also be used.
-///
-/// YAML's "merge keys" (https://yaml.org/type/merge.html) are supported.
-///
-/// For inspiration and background, see:
-/// https://www.boost.org/doc/libs/release/libs/serialization/doc/tutorial.html
+/// (Advanced) A helper class for @ref yaml_serialization "YAML Serialization"
+/// that loads data from a YAML file into a C++ structure.
 class YamlReadArchive final {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(YamlReadArchive)
@@ -94,24 +56,38 @@ class YamlReadArchive final {
     bool retain_map_defaults{false};
   };
 
-  /// Creates an archive that reads from @p root.  See the %YamlReadArchive
-  /// class overview for details.
+  /// (Advanced) Creates an archive that reads from @p root.
+  /// Prefer to use the functions in yaml_io.h, instead.
   explicit YamlReadArchive(const YAML::Node& root);
 
-  /// Creates an archive that reads from @p root, with @p options that allow
-  /// for less restrictive parsing.  See the %YamlReadArchive class overview
-  /// for details.
+  /// (Advanced) Creates an archive that reads from @p root,
+  /// with @p options that allow for less restrictive parsing.
+  /// Prefer to use the functions in yaml_io.h, instead.
   YamlReadArchive(const YAML::Node& root, const Options& options);
 
-  /// Sets the contents `serializable` based on the YAML file associated with
-  /// this archive.  See the %YamlReadArchive class overview for details.
+  /// (Internal use only.)
+  YamlReadArchive(internal::Node root, const Options& options);
+
+  /// (Internal use only.)
+  static internal::Node LoadFileAsNode(
+      const std::string& filename,
+      const std::optional<std::string>& child_name);
+
+  /// (Internal use only.)
+  static internal::Node LoadStringAsNode(
+      const std::string& data,
+      const std::optional<std::string>& child_name);
+
+  /// (Advanced) Sets the contents `serializable` based on the YAML file
+  /// associated this archive.
   template <typename Serializable>
   void Accept(Serializable* serializable) {
-    DoAccept(this, serializable, static_cast<int32_t>(0));
+    DRAKE_THROW_UNLESS(serializable != nullptr);
+    this->DoAccept(serializable, static_cast<int32_t>(0));
     CheckAllAccepted();
   }
 
-  /// (Advanced.)  Sets the value pointed to by `nvp.value()` based on the YAML
+  /// (Advanced) Sets the value pointed to by `nvp.value()` based on the YAML
   /// file associated with this archive.  Most users should call Accept, not
   /// Visit.
   template <typename NameValuePair>
@@ -176,16 +152,30 @@ class YamlReadArchive final {
   // @name Overloads for the Accept() implementation
 
   // This version applies when Serialize is member method.
-  template <typename Archive, typename Serializable>
-  auto DoAccept(Archive* a, Serializable* serializable, int32_t) ->
-      decltype(serializable->Serialize(a)) {
-    serializable->Serialize(a);
+  template <typename Serializable>
+  auto DoAccept(Serializable* serializable, int32_t) ->
+      decltype(serializable->Serialize(this)) {
+    serializable->Serialize(this);
+  }
+
+  // This version applies when `value` is a std::map from std::string to
+  // Serializable.  The map's values must be serializable, but there is no
+  // Serialize function required for the map itself.
+  template <typename Serializable>
+  void DoAccept(std::map<std::string, Serializable>* value, int32_t) {
+    DRAKE_THROW_UNLESS(root_ != nullptr);
+    DRAKE_THROW_UNLESS(root_->IsMapping());
+    VisitMapDirectly<Serializable>(*root_, value);
+    for (const auto& [name, ignored] : *value) {
+      unused(ignored);
+      visited_names_.insert(name);
+    }
   }
 
   // This version applies when Serialize is an ADL free function.
-  template <typename Archive, typename Serializable>
-  void DoAccept(Archive* a, Serializable* serializable, int64_t) {
-    Serialize(a, serializable);
+  template <typename Serializable>
+  void DoAccept(Serializable* serializable, int64_t) {
+    Serialize(this, serializable);
   }
 
   // --------------------------------------------------------------------------
@@ -491,19 +481,24 @@ class YamlReadArchive final {
     const internal::Node* sub_node = GetSubNodeMapping(nvp.name());
     if (sub_node == nullptr) { return; }
     auto& result = *nvp.value();
+    this->VisitMapDirectly<Value>(*sub_node, &result);
+  }
+
+  template <typename Value, typename Map>
+  void VisitMapDirectly(const internal::Node& node, Map* result) {
     if (!options_.retain_map_defaults) {
-      result.clear();
+      result->clear();
     }
-    for (const auto& [key, value] : sub_node->GetMapping()) {
+    for (const auto& [key, value] : node.GetMapping()) {
       unused(value);
-      auto newiter_inserted = result.emplace(key, Value{});
+      auto newiter_inserted = result->emplace(key, Value{});
       auto& newiter = newiter_inserted.first;
       const bool inserted = newiter_inserted.second;
       if (!options_.retain_map_defaults) {
         DRAKE_DEMAND(inserted == true);
       }
       Value& newvalue = newiter->second;
-      YamlReadArchive item_archive(sub_node, this);
+      YamlReadArchive item_archive(&node, this);
       item_archive.Visit(drake::MakeNameValue(key.c_str(), &newvalue));
     }
   }

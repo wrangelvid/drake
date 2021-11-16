@@ -1,0 +1,171 @@
+# -*- python -*-
+
+load(
+    "@drake//tools/skylark:drake_cc.bzl",
+    "drake_cc_binary",
+    "drake_cc_googletest",
+    "drake_cc_library",
+    "drake_cc_package_library",
+)
+load("//tools/lint:lint.bzl", "add_lint_tests")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "models",
+    srcs = glob(
+        [
+            "models/**",
+        ],
+        exclude = [
+            "**/*.sha512",
+        ],
+    ),
+)
+
+drake_cc_package_library(
+    name = "rational_forward_kinematics",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":configuration_space_collision_free_region",
+        ":convex_geometry",
+        ":generate_monomial_basis_util",
+        ":plane_side",
+        ":rational_forward_kinematics_core",
+    ],
+)
+
+drake_cc_library(
+    name = "rational_forward_kinematics_core",
+    srcs = [
+        "rational_forward_kinematics.cc",
+        "rational_forward_kinematics_internal.cc",
+    ],
+    hdrs = [
+        "rational_forward_kinematics.h",
+        "rational_forward_kinematics_internal.h",
+    ],
+    deps = [
+        "//common:symbolic",
+        "//multibody/plant",
+    ],
+)
+
+drake_cc_library(
+    name = "generate_monomial_basis_util",
+    srcs = ["generate_monomial_basis_util.cc"],
+    hdrs = ["generate_monomial_basis_util.h"],
+    deps = [
+        "//common:symbolic",
+    ],
+)
+
+drake_cc_library(
+    name = "plane_side",
+    srcs = ["plane_side.cc"],
+    hdrs = ["plane_side.h"],
+    deps = [],
+)
+
+drake_cc_library(
+    name = "convex_geometry",
+    srcs = ["convex_geometry.cc"],
+    hdrs = ["convex_geometry.h"],
+    deps = [
+        ":plane_side",
+        "//multibody/tree",
+        "//solvers:mathematical_program",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_library(
+    name = "configuration_space_collision_free_region",
+    srcs = [
+        "configuration_space_collision_free_region.cc",
+        "filtered_collision_pairs.cc",
+    ],
+    hdrs = [
+        "configuration_space_collision_free_region.h",
+    ],
+    deps = [
+        ":convex_geometry",
+        ":generate_monomial_basis_util",
+        ":plane_side",
+        ":rational_forward_kinematics_core",
+        "//solvers:mathematical_program",
+        "//solvers:mathematical_program_result",
+        "//solvers:mosek_solver",
+    ],
+)
+
+# === test/ ===
+
+drake_cc_library(
+    name = "rational_forward_kinematics_test_utilities",
+    testonly = 1,
+    srcs = ["test/rational_forward_kinematics_test_utilities.cc"],
+    hdrs = ["test/rational_forward_kinematics_test_utilities.h"],
+    data = [
+        ":models",
+        "//examples/kuka_iiwa_arm:models",
+        "//manipulation/models/iiwa_description:models",
+    ],
+    deps = [
+        ":configuration_space_collision_free_region",
+        "//common:find_resource",
+        "//multibody/benchmarks/kuka_iiwa_robot",
+        "//multibody/parsing:parser",
+        "//multibody/plant",
+        "//solvers:solve",
+        "//systems/analysis:simulator",
+        "//systems/rendering:multibody_position_to_geometry_pose",
+    ],
+)
+
+drake_cc_googletest(
+    name = "configuration_space_collision_free_region_test",
+    deps = [
+        ":configuration_space_collision_free_region",
+        ":rational_forward_kinematics_test_utilities",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:symbolic_test_util",
+        "//multibody/inverse_kinematics",
+    ],
+)
+
+drake_cc_googletest(
+    name = "convex_geometry_test",
+    deps = [
+        ":convex_geometry",
+        "//common/test_utilities:eigen_matrix_compare",
+    ],
+)
+
+drake_cc_googletest(
+    name = "generate_monomial_basis_util_test",
+    deps = [
+        ":generate_monomial_basis_util",
+    ],
+)
+
+drake_cc_googletest(
+    name = "rational_forward_kinematics_test",
+    timeout = "moderate",
+    deps = [
+        ":rational_forward_kinematics_core",
+        ":rational_forward_kinematics_test_utilities",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:symbolic_test_util",
+    ],
+)
+
+drake_cc_googletest(
+    name = "rational_forward_kinematics_internal_test",
+    deps = [
+        ":rational_forward_kinematics_core",
+        ":rational_forward_kinematics_test_utilities",
+    ],
+)
+
+add_lint_tests()

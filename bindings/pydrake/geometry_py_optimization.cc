@@ -14,6 +14,7 @@
 #include "drake/geometry/optimization/minkowski_sum.h"
 #include "drake/geometry/optimization/point.h"
 #include "drake/geometry/optimization/vpolytope.h"
+#include "drake/geometry/optimization/convex_set.h"
 
 namespace drake {
 namespace pydrake {
