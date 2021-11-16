@@ -18,14 +18,14 @@ load(
 filegroup(
     name = "models",
     data = [
+        "assets/box.urdf",
+        "assets/planar1dof.urdf",
+        "assets/planar2dof.urdf",
         "planar_iiwa14_one_sphere.urdf",
         "planar_iiwa_dense_collision_welded_gripper.yaml",
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
         "shelves.sdf",
-        "assets/planar2dof.urdf",
-        "assets/planar1dof.urdf",
-        "assets/box.urdf"
     ],
     visibility = ["//visibility:public"],
 )

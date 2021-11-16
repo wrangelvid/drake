@@ -492,6 +492,8 @@ void DoScalarIndependentDefinitions(py::module m) {
   pydrake::internal::BindAutoDiffMathOverloads(&m);
   pydrake::internal::BindSymbolicMathOverloads<Expression>(&m);
 }
+
+
 }  // namespace
 
 PYBIND11_MODULE(math, m) {
@@ -505,8 +507,9 @@ PYBIND11_MODULE(math, m) {
   DoScalarIndependentDefinitions(m);
   type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
       CommonScalarPack{});
-
   ExecuteExtraPythonCode(m);
+
+
 }
 
 }  // namespace pydrake

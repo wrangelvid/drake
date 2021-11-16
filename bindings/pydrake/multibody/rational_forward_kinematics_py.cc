@@ -24,14 +24,14 @@ void DoPoseDeclaration(py::module m, T)    {
     auto cls = DefineTemplateClassWithDefault<Class>(m, "RationalForwardKinematicsPose", param);
 //    py::class_<Class>(m, "Pose")
     cls
-        .def("p_AB", [](const Class& self) {return self.p_AB;})
-        .def("R_AB", [](const Class& self) {return self.R_AB;})
+        .def("translation", [](const Class& self) {return self.p_AB;})
+        .def("rotation", [](const Class& self) {return self.R_AB;})
 //        .def_readwrite("p_AB", &RationalForwardKinematics::Pose<T>::p_AB)
 //        .def_readwrite("R_AB", &RationalForwardKinematics::Pose<T>::R_AB)
         .def_readwrite(
             "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
-        .def_readwrite(
-            "dummy", &RationalForwardKinematics::Pose<T>::dummy);
+        .def("asRigidTransformExpr", [](const Class& self) {return self.asRigidTransformExpression();});
+
 
     DefCopyAndDeepCopy(&cls);
 //    AddValueInstantiation<Class>(m);

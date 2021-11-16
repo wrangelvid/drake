@@ -908,7 +908,8 @@ PYBIND11_MODULE(symbolic, m) {
                     .def(py::self / Polynomial())
                     .def(Polynomial() / py::self)
                             // Logical comparison
-                    .def(py::self == py::self);
+                    .def(py::self == py::self)
+                    .def("ToExpression", &RationalFunction::ToExpression);
 }
 }  // namespace pydrake
 }  // namespace drake
