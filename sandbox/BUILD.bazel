@@ -23,8 +23,6 @@ filegroup(
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
         "shelves.sdf",
-        "assets/planar2dof.urdf",
-        "assets/planar1dof.urdf",
         "assets/box.urdf",
         "assets/doublerob.urdf"
     ],
