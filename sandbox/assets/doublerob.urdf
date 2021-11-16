@@ -145,6 +145,16 @@
     </visual>
   </link>
 
+  <link name="linkbaviz">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.04 0.4"/>
+      </geometry>
+      <material name="li"/>
+    </visual>
+  </link>
+
   <joint name="jointva" type="fixed">
     <origin rpy="0 0 0" xyz="0 0 -0.2"/>
     <parent link="linka"/>
@@ -163,7 +173,11 @@
     <child link="link2viz"/>
   </joint>
 
- 
+  <joint name="jointvba" type="fixed">
+    <origin rpy="0 0 0" xyz="0 -1.5 0.0"/>
+    <parent link="base"/>
+    <child link="linkbaviz"/>
+  </joint>
 
   <!--<collision_filter_group name="dyncolgroup">  
     <member link="link1"/>

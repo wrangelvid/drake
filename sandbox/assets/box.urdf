@@ -24,13 +24,13 @@
     <collision>
        <origin xyz="0 0 .0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 1.8"/>
+        <box size="0.4 0.1 2.4"/>
       </geometry>
     </collision>
     <visual>
       <origin xyz="0 0 .0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 1.8"/>
+        <box size="0.4 0.1 2.4"/>
       </geometry>
       <material name="Gray"/>
     </visual>
@@ -56,13 +56,13 @@
     <collision>
        <origin xyz="0 0 .0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 1.8"/>
+        <box size="0.4 0.1 2.4"/>
       </geometry>
     </collision>
     <visual>
       <origin xyz="0 0 .0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.4 0.1 1.8"/>
+        <box size="0.4 0.1 2.4"/>
       </geometry>
       <material name="Gray"/>
     </visual>
@@ -85,7 +85,7 @@
   </link>
 
   <joint name="jbox1" type="fixed">
-    <origin rpy="1.5707 0 0" xyz="0 -0.75 -0.05"/>
+    <origin rpy="1.5707 0 0" xyz="0 -0.55 -0.05"/>
     <parent link="base"/>
     <child link="box1"/>
   </joint>
@@ -97,7 +97,7 @@
   </joint>
 
   <joint name="jbox3" type="fixed">
-    <origin rpy="1.5707 0 0" xyz="0 -0.75 2.0"/>
+    <origin rpy="1.5707 0 0" xyz="0 -0.55 2.0"/>
     <parent link="base"/>
     <child link="box3"/>
   </joint>
