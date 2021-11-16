@@ -91,7 +91,7 @@
   </joint>
 
   <joint name="jbox2" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0.2 1.0"/>
+    <origin rpy="0 0 0" xyz="0 0.6 1.0"/>
     <parent link="base"/>
     <child link="box2"/>
   </joint>
