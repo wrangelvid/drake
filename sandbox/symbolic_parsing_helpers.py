@@ -33,7 +33,7 @@ def rationalize_trig_expr(expr, rules):
     return make_rational_function_from_expression(xreplace(expr, rules))
 
 
-def make_rational_function_from_expression(expr):
+def RationalFunctionFromExpression(expr):
     # TODO handle nested fractions
     LegalPolyExpressionKind = [
         sym.ExpressionKind.Var,
@@ -64,9 +64,9 @@ def make_rational_function_from_expression(expr):
         else:
             res = RationalFunction(0)
         for e in args:
-            res = ctor(res, make_rational_function_from_expression(e))
+            res = ctor(res, RationalFunctionFromExpression(e))
+
         return res
 
     else:
         raise NotRationalFunctionException(expr.to_string() + " is not rational but of type " + expr.get_kind())
-

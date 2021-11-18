@@ -64,6 +64,11 @@ void RationalFunction::CheckIndeterminates() const {
   }
 }
 
+Expression RationalFunction::ToExpression() const {
+  // Returns ∑ᵢ (cᵢ * mᵢ).
+  return numerator_.ToExpression()/denominator_.ToExpression();
+}
+
 RationalFunction& RationalFunction::operator+=(const RationalFunction& f) {
   numerator_ = numerator_ * f.denominator() + denominator_ * f.numerator();
   denominator_ *= f.denominator();

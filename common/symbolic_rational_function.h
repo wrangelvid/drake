@@ -26,7 +26,7 @@ namespace symbolic {
  * p1(x) / q1(x) + p2(x) / q2(x) + ... + pn(x) / qn(x). This class's explicit
  * structure facilitates this decomposition.
  */
-class RationalFunction {
+class RationalFunction  {
  public:
   /** Constructs a zero rational function 0 / 1. */
   RationalFunction();
@@ -108,6 +108,9 @@ class RationalFunction {
   Formula operator!=(const RationalFunction& f) const;
 
   friend std::ostream& operator<<(std::ostream&, const RationalFunction& f);
+
+  /// Returns an equivalent symbolic expression of this polynomial.
+  Expression ToExpression() const;
 
  private:
   // Throws std::exception if an indeterminate of the denominator (numerator,
