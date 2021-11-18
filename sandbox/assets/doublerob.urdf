@@ -69,11 +69,42 @@
     </inertial>
   </link>
 
+  <link name="linka">
+    <collision>
+      <origin xyz="0 0 .65" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 1.1"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 0 .65" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.1 0.1 1.1"/>
+      </geometry>
+      <material name="Green"/>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0.65" rpy="0 0 0"/>
+      <mass value="1"/>
+      <inertia
+        ixx="1.1" ixy="0.0" ixz="0.0"
+        iyy="1.1" iyz="0.0"
+        izz="0.1"/>
+    </inertial>
+  </link>
+
   <joint name="joint1" type="revolute">
     <origin rpy="0 0 0" xyz="0 0 0"/>
     <axis xyz="1 0 0"/>
     <parent link="base"/>
     <child link="link1"/>
+  </joint>
+
+  <joint name="jointa" type="revolute">
+    <origin rpy="0 0 0" xyz="0 -1.5 0.4"/>
+    <axis xyz="1 0 0"/>
+    <parent link="base"/>
+    <child link="linka"/>
   </joint>
   
   <joint name="joint2" type="revolute">
@@ -104,6 +135,32 @@
     </visual>
   </link>
 
+  <link name="linkaviz">
+    <visual>
+      <origin xyz="0 0 0.6" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.04 0.8"/>
+      </geometry>
+      <material name="li"/>
+    </visual>
+  </link>
+
+  <link name="linkbaviz">
+    <visual>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.04 0.4"/>
+      </geometry>
+      <material name="li"/>
+    </visual>
+  </link>
+
+  <joint name="jointva" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 -0.2"/>
+    <parent link="linka"/>
+    <child link="linkaviz"/>
+  </joint>
+
   <joint name="jointv1" type="fixed">
     <origin rpy="0 0 0" xyz="0 0 0"/>
     <parent link="link1"/>
@@ -116,7 +173,11 @@
     <child link="link2viz"/>
   </joint>
 
- 
+  <joint name="jointvba" type="fixed">
+    <origin rpy="0 0 0" xyz="0 -1.5 0.0"/>
+    <parent link="base"/>
+    <child link="linkbaviz"/>
+  </joint>
 
   <!--<collision_filter_group name="dyncolgroup">  
     <member link="link1"/>
