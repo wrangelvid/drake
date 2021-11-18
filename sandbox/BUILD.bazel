@@ -52,7 +52,20 @@ drake_py_library(
 )
 
 drake_jupyter_py_binary(
-    name = "iris_test_amice",
+    name = "iris_in_t_space_clean",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "iris_in_t_space_experiment",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
