@@ -111,3 +111,16 @@ drake_jupyter_py_binary(
         "//bindings/pydrake",
     ],
 )
+
+drake_jupyter_py_binary(
+    name = "rational_2d_iris_example",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+    ],
+)
