@@ -49,7 +49,7 @@ def RationalFunctionFromExpression(expr):
     expr_kind = expr.get_kind()
 
     if expr.is_polynomial():
-        return sym.Polynomial(expr)
+        return sym.RationalFunction(sym.Polynomial(expr))
     elif expr_kind not in LegalPolyExpressionKind:
         raise NotRationalFunctionException(expr.to_string() + " is not rational")
     elif expr_kind == sym.ExpressionKind.Div:

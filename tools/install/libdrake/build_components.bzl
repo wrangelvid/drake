@@ -66,6 +66,7 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/optimization",
     "//multibody/parsing",
     "//multibody/plant",
+    "//multibody/rational_forward_kinematics",
     "//multibody/plant:contact_results_to_lcm",  # unpackaged
     "//multibody/topology:multibody_graph",  # unpackaged
     "//multibody/tree",

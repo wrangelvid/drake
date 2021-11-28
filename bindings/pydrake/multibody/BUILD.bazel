@@ -180,7 +180,7 @@ drake_pybind_library(
         "//bindings/pydrake/common:default_scalars_pybind",
         "//bindings/pydrake/common:sorted_pair_pybind",
         "//bindings/pydrake/common:value_pybind",
-        "//multibody/rational_forward_kinematics",
+        #        "//multibody/rational_forward_kinematics",
     ],
     cc_srcs = ["rational_forward_kinematics_py.cc"],
     package_info = PACKAGE_INFO,
