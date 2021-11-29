@@ -15,9 +15,10 @@ def box_obstacle(pos, pos_box = [0, 0], width= 0.3, height = 0.3):
     return width_col and height_col 
 
 def collision(pos):
-    b1 = box_obstacle(pos, [0, 0], width=1.0, height=1.0)
-    b2 = box_obstacle(pos, [0.5, 0.3], width=1.8, height=0.2)
-    return b1 or b2
+    b1 = box_obstacle(pos, [0, -0.4], width=0.2, height=1.0)
+    b2 = box_obstacle(pos, [-0.5, 0.3], width=0.6, height=0.2)
+    b3 = box_obstacle(pos, [0.5, 0.3], width=0.6, height=0.2)
+    return b1 or b2 or b3
 
 RRT = rrt.RRT(start,
               goal,
@@ -25,11 +26,13 @@ RRT = rrt.RRT(start,
               col_func_handle=collision,
               max_extend_length=0.2,
               extend_steps=0.01,
-              init_goal_sample_rate=0.05,
-              goal_sample_rate_scaler=0.1)
+              init_goal_sample_rate=0.03,
+              goal_sample_rate_scaler=0.2,
+              verbose = True)
 
-for _ in range(10000):
-    RRT.sample_node_pos()
-    
-RRT.run(300)
+#draw some points from initial distribution to show constraints
+for _ in range(2000):
+    pos_samp = RRT.sample_node_pos()
+    RRT.ax.scatter(pos_samp[0], pos_samp[1], c = 'k', s = 1, alpha= 0.1)
+success, path = RRT.run(300)
 plt.show()

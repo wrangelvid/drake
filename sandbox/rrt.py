@@ -19,7 +19,8 @@ class RRT:
                  max_extend_length = 1e-1,
                  extend_steps = 1e-2, 
                  init_goal_sample_rate = 0.05,
-                 goal_sample_rate_scaler = 0.1
+                 goal_sample_rate_scaler = 0.1,
+                 verbose = False
                  ):
 
         #col_check(pos) == True -> in collision!
@@ -51,6 +52,8 @@ class RRT:
         self.max_extend_length = max_extend_length
         self.extend_step_size = extend_steps
         self.max_extend_steps = int(max_extend_length/self.extend_step_size)
+        self.verbose = verbose
+        
         self.dim = len(start)
         self.distance_to_go = 1e9
 
@@ -88,8 +91,6 @@ class RRT:
         if not good_sample:
             print("[RRT ERROR] Could not find collision free point in MAXIT")
             raise NotImplementedError
-
-        self.ax.scatter(pos_samp[0], pos_samp[1], c = 'k', s = 1, alpha= 0.1)
         return pos_samp
 
     def grow_naive(self, parent, pos_samp):
@@ -128,6 +129,7 @@ class RRT:
 
         for it in range(n_it):
             pos_samp = self.sample_node_pos()
+            self.ax.scatter(pos_samp[0], pos_samp[1], c = 'k', s = 5, alpha= 1.0)
             nearest_id = self.get_closest_node(pos_samp) 
             parent_node = self.nodes[nearest_id]
             child_node = self.grow_naive(parent_node, pos_samp)
@@ -141,10 +143,11 @@ class RRT:
             if dist_to_target<self.distance_to_go:
                 self.distance_to_go = dist_to_target
                 self.closest_id = child_node.id
-                print('distance to target:', self.distance_to_go)
+                if self.verbose:
+                    print("it: {iter} distance to target {dist: .3f}".format(iter =it, dist = self.distance_to_go))
                 self.goal_sample_rate = np.clip(0.8 - self.distance_to_go*self.goal_sample_rate_scaler, a_min = self.init_goal_sample_rate, a_max = 1)
 
-            if self.distance_to_go< 1e-6:
+            if self.distance_to_go< self.extend_step_size:
                 break
 
         #walk back through tree to get closest node    
@@ -159,5 +162,11 @@ class RRT:
             self.ax.plot(xs, ys, c = 'r')
             current_node = current_node.parent
             path.append(current_node.pos)
-        print('[RRT} Collision free path found in ', it,' steps')
-        return path[::-1]
+        
+        if self.distance_to_go <= self.extend_step_size:
+            print('[RRT] Collision free path found in ', it,' steps')
+            return True, path[::-1]
+        else:
+            print('[RRT] Could not find path in ', it,' steps')
+            return False, path[::-1]
+       
