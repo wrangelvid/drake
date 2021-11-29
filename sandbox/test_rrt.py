@@ -28,7 +28,7 @@ ax.scatter(start[0], start[1], c = 'r', s = 50)
 ax.scatter(goal[0], goal[1], c = 'g', s = 50)
 plt.show(block=False)
 
-def plotting_fn(parent_node, child_node, pos_samp, ax, color):
+def plotting_fn(parent_node, child_node, pos_samp, it, ax, color):
     ax.plot([child_node.pos[0], parent_node.pos[0]], [child_node.pos[1], parent_node.pos[1]], c = color)
     ax.scatter(child_node.pos[0], child_node.pos[1], c = color, s = 5, alpha= 1.0)
            

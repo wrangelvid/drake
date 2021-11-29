@@ -150,3 +150,24 @@ drake_jupyter_py_binary(
         "//sandbox:symbolic_parsing_helpers",
     ],
 )
+
+drake_py_library(
+    name = "rrt",
+    srcs = [
+        "rrt.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+drake_jupyter_py_binary(
+    name = "2d_rrt_vs_iris",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:rrt",
+    ],
+)

@@ -61,7 +61,7 @@ class RRT:
        
 
     def get_closest_node(self, pos):
-        dists = np.linalg.norm(pos.reshape(-1,2) - np.array(self.node_pos), axis=1)
+        dists = np.linalg.norm(pos.reshape(-1, self.dim) - np.array(self.node_pos), axis=1)
         id_min = np.argmin(dists)
         return id_min
 
@@ -134,7 +134,7 @@ class RRT:
             dist_to_target = np.linalg.norm(self.goal - self.node_pos[-1])
 
             if self.do_plot:
-                self.plotcallback(parent_node, child_node, pos_samp)
+                self.plotcallback(parent_node, child_node, pos_samp, it)
 
             if dist_to_target<self.distance_to_go:
                 self.distance_to_go = dist_to_target
