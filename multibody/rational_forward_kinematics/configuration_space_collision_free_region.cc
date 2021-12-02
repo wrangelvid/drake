@@ -173,6 +173,7 @@ void ConfigurationSpaceCollisionFreeRegion::ComputeBoundsOnT(
 }
 
 std::vector<LinkVertexOnPlaneSideRational>
+// Generate t space sos conditions
 ConfigurationSpaceCollisionFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
     const FilteredCollisionPairs& filtered_collision_pairs) const {
@@ -343,6 +344,7 @@ void FindMonomialBasisForAffineSeparatingPlane(
 }  // namespace
 
 std::unique_ptr<drake::solvers::MathematicalProgram>
+// Actually constructs the programs
 ConfigurationSpaceCollisionFreeRegion::ConstructProgramToVerifyCollisionFreeBox(
     const std::vector<LinkVertexOnPlaneSideRational>& rationals,
     const Eigen::Ref<const Eigen::VectorXd>& t_lower,

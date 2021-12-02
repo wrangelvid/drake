@@ -65,6 +65,7 @@ def RationalFunctionFromExpression(expr):
             res = RationalFunction(0)
         for e in args:
             res = ctor(res, RationalFunctionFromExpression(e))
+            print("hit this")
 
         return res
 
