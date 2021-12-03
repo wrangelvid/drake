@@ -179,6 +179,15 @@ drake_py_library(
     deps = ["//bindings/pydrake",]
 )
 
+drake_py_library(
+    name = "prm",
+    srcs = [
+        "prm.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//bindings/pydrake",]
+)
+
 drake_jupyter_py_binary(
     name = "2d_rrt_vs_iris",
     add_test_rule = 0,
@@ -189,6 +198,7 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:rrt",
+        "//sandbox:prm",
         "//sandbox:utils"
     ],
 )
