@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.sparse.csgraph import dijkstra
+from scipy.sparse.csgraph import dijkstra, csgraph_from_dense
+from scipy.sparse import coo_matrix
 
 class Node:
     def __init__(self, pos, cost, parent = None):
@@ -125,25 +126,40 @@ class PRM:
 
     def build_adjacency_mat(self,):
         N = len(self.nodes)
-        ad_mat = np.zeros((N, N))
+        data =[]
+        rows = []
+        cols = []
+        
+        ad_mat = coo_matrix((N,N), np.float32)
+
         for idx in range(N):
             nei_idx = 0
             for nei in self.adjacency_list[idx]:
                 if not nei == idx:
-                    ad_mat[idx, nei] = self.dist_adj[idx][nei_idx]
-                    ad_mat[nei, idx] = self.dist_adj[idx][nei_idx]
-                     
+                    data.append(self.dist_adj[idx][nei_idx])
+                    rows.append(idx)
+                    cols.append(nei)
+                    data.append(self.dist_adj[idx][nei_idx])
+                    rows.append(nei)
+                    cols.append(idx)
+                    #ad_mat[idx, nei] = self.dist_adj[idx][nei_idx]
+                    #ad_mat[nei, idx] = self.dist_adj[idx][nei_idx]
                 nei_idx +=1
+        
+        ad_mat = coo_matrix((data, (rows, cols)), shape = (N,N))  
         return ad_mat
     
     def find_shortest_path(self):
         ad_mat = self.build_adjacency_mat()
         dist, pred = dijkstra(ad_mat, directed=False, indices=-2, return_predecessors=True)
+        print('disconnected', np.argwhere(pred == -9999))
+        pred[pred == -9999] = -100000000  
+        
         sp_list = []
         sp_length = dist[-1]
         current_idx = -1
         sp_list.append(self.nodes[current_idx])
-        while not current_idx == ad_mat.shape[0]-2:
+        while not current_idx == ad_mat.shape[0]-2: 
             current_idx = pred[current_idx]
             sp_list.append(self.nodes[current_idx])
         return sp_list, sp_length

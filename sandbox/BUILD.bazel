@@ -213,6 +213,7 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:rrt",
+        "//sandbox:prm",
         "//sandbox:utils",
         "//sandbox:spp"
     ],
