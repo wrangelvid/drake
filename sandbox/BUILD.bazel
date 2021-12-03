@@ -25,6 +25,9 @@ filegroup(
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
         "shelves.sdf",
+        "shelves2.sdf",
+        "shelves3.sdf",
+        "shelves4.sdf",
     ],
     visibility = ["//visibility:public"],
 )
@@ -159,6 +162,23 @@ drake_py_library(
     visibility = ["//visibility:public"],
 )
 
+drake_py_library(
+    name = "utils",
+    srcs = [
+        "utils.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+drake_py_library(
+    name = "spp",
+    srcs = [
+        "spp.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//bindings/pydrake",]
+)
+
 drake_jupyter_py_binary(
     name = "2d_rrt_vs_iris",
     add_test_rule = 0,
@@ -169,5 +189,21 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:rrt",
+        "//sandbox:utils"
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "iiwa_example",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:rrt",
+        "//sandbox:utils",
+        "//sandbox:spp"
     ],
 )
