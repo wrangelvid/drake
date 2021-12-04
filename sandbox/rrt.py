@@ -124,6 +124,8 @@ class RRT:
     def run(self, n_it):
 
         for it in range(n_it):
+            if it%1000 == 0:
+                print(it)
             pos_samp = self.sample_node_pos()
             nearest_id = self.get_closest_node(pos_samp) 
             parent_node = self.nodes[nearest_id]

@@ -152,7 +152,7 @@ class PRM:
     def find_shortest_path(self):
         ad_mat = self.build_adjacency_mat()
         dist, pred = dijkstra(ad_mat, directed=False, indices=-2, return_predecessors=True)
-        print('disconnected', np.argwhere(pred == -9999))
+        print(f'{len(np.argwhere(pred == -9999))} disconnected nodes', np.argwhere(pred == -9999))
         pred[pred == -9999] = -100000000  
         
         sp_list = []
