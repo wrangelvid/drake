@@ -220,7 +220,23 @@ drake_jupyter_py_binary(
 )
 
 drake_jupyter_py_binary(
-    name = "multi_iiwa_example",
+    name = "iiwa_example_two",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:rrt",
+        "//sandbox:prm",
+        "//sandbox:utils",
+        "//sandbox:spp"
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "iiwa_example_three",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
