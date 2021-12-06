@@ -882,6 +882,8 @@ PYBIND11_MODULE(symbolic, m) {
                     .def(py::init<double>())
                     .def("numerator", &RationalFunction::numerator)
                     .def("denominator", &RationalFunction::denominator)
+                    .def("SetIndeterminates", &RationalFunction::SetIndeterminates,
+                         doc.Polynomial.SetIndeterminates.doc)
                     .def("__str__",
                          [](const RationalFunction &self) { return fmt::format("{}", self); })
                             // Arithmetic

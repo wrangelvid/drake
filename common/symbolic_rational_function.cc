@@ -70,8 +70,13 @@ Expression RationalFunction::ToExpression() const {
 }
 
 RationalFunction& RationalFunction::operator+=(const RationalFunction& f) {
-  numerator_ = numerator_ * f.denominator() + denominator_ * f.numerator();
-  denominator_ *= f.denominator();
+  if(f.denominator().EqualTo(denominator_)){
+    numerator_ = numerator_ + f.numerator();
+  }
+  else{
+    numerator_ = numerator_ * f.denominator() + denominator_ * f.numerator();
+    denominator_ *= f.denominator();
+  }  
   return *this;
 }
 
@@ -223,5 +228,10 @@ RationalFunction pow(const RationalFunction& f, int n) {
     return RationalFunction(pow(f.denominator(), -n), pow(f.numerator(), -n));
   }
 }
+
+void RationalFunction::SetIndeterminates(const Variables &new_indeterminates) {
+        numerator_.SetIndeterminates(new_indeterminates);
+        denominator_.SetIndeterminates(new_indeterminates);
+    }
 }  // namespace symbolic
 }  // namespace drake

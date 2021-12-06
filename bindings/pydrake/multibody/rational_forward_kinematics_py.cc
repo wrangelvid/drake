@@ -9,6 +9,7 @@
 
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics.h"
+#include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 
 
@@ -85,6 +86,10 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
                      py::arg("start"),
                      py::arg("end")
                      //             cls_doc.CalcLinkPoses
+                     )
+        .def("CalcLinkPoseAsMultilinearPolynomials", &Class::CalcLinkPoseAsMultilinearPolynomial,
+                     py::arg("q_star"), py::arg("link_index"), py::arg("expressed_body_index")
+        //             cls_doc.CalcLinkPoses
                      );
   }//RationalForwardKinematics Class
   //RationalForwardKinematics Util methods
@@ -100,6 +105,10 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
   type_pack<symbolic::Polynomial, symbolic::RationalFunction> sym_pack;
   type_visit([m](auto dummy) { DoPoseDeclaration(m, dummy); },
       sym_pack);
+
+  // find link in middle of body
+  m.def("FindBodyInTheMiddleOfChain", &drake::multibody::internal::FindBodyInTheMiddleOfChain,
+    py::arg("plant"), py::arg("start"), py::arg("end"));
 }
 //Pose
 
