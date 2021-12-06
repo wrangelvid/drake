@@ -24,10 +24,10 @@ filegroup(
         "planar_iiwa_dense_collision_welded_gripper.yaml",
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
-        "assets/shelves.sdf",
-        "assets/shelves2.sdf",
-        "assets/shelves3.sdf",
-        "assets/shelves4.sdf",
+        "shelves.sdf",
+        "shelves2.sdf",
+        "shelves3.sdf",
+        "shelves4.sdf",
     ],
     visibility = ["//visibility:public"],
 )
@@ -68,6 +68,19 @@ drake_jupyter_py_binary(
 
 drake_jupyter_py_binary(
     name = "iris_in_t_space_experiment",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "psatz",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
@@ -176,7 +189,7 @@ drake_py_library(
         "spp.py",
     ],
     visibility = ["//visibility:public"],
-    deps = ["//bindings/pydrake",]
+    deps = ["//bindings/pydrake"],
 )
 
 drake_py_library(
@@ -185,7 +198,7 @@ drake_py_library(
         "prm.py",
     ],
     visibility = ["//visibility:public"],
-    deps = ["//bindings/pydrake",]
+    deps = ["//bindings/pydrake"],
 )
 
 drake_jupyter_py_binary(
@@ -197,9 +210,9 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
-        "//sandbox:rrt",
         "//sandbox:prm",
-        "//sandbox:utils"
+        "//sandbox:rrt",
+        "//sandbox:utils",
     ],
 )
 
@@ -212,10 +225,10 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
-        "//sandbox:rrt",
         "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:spp",
         "//sandbox:utils",
-        "//sandbox:spp"
     ],
 )
 
@@ -228,10 +241,10 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
-        "//sandbox:rrt",
         "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:spp",
         "//sandbox:utils",
-        "//sandbox:spp"
     ],
 )
 
@@ -244,9 +257,9 @@ drake_jupyter_py_binary(
     ],
     deps = [
         "//bindings/pydrake",
-        "//sandbox:rrt",
         "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:spp",
         "//sandbox:utils",
-        "//sandbox:spp"
     ],
 )
