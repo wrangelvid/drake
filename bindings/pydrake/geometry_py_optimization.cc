@@ -228,6 +228,8 @@ void DefineGeometryOptimization(py::module m) {
             cls_doc.ctor.doc)
         .def("Solve", &Class::Solve, py::arg("use_rounding") = false,
             cls_doc.Solve.doc)
+        .def("SolveVerbose", &Class::SolveVerbose, py::arg("use_rounding") = false,
+            cls_doc.Solve.doc)
         .def("order", &Class::order, cls_doc.order.doc)
         .def("max_repetitions", &Class::max_repetitions,
             cls_doc.max_repetitions.doc)

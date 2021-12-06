@@ -28,6 +28,8 @@ filegroup(
         "assets/shelves2.sdf",
         "assets/shelves3.sdf",
         "assets/shelves4.sdf",
+        "assets/lid.urdf",
+        "assets/ground.urdf",
     ],
     visibility = ["//visibility:public"],
 )
@@ -49,6 +51,14 @@ drake_py_library(
     name = "symbolic_parsing_helpers",
     srcs = [
         "symbolic_parsing_helpers.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+drake_py_library(
+    name = "t_space_utils",
+    srcs = [
+        "t_space_utils.py",
     ],
     visibility = ["//visibility:public"],
 )
@@ -138,6 +148,7 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:t_space_utils",
     ],
 )
 
