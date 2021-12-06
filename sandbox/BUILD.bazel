@@ -28,13 +28,9 @@ filegroup(
         "assets/shelves.sdf",
         "assets/shelves2.sdf",
         "assets/shelves3.sdf",
-<<<<<<< HEAD
         "assets/shelves4.sdf",
         "assets/lid.urdf",
         "assets/ground.urdf",
-=======
-        "assets/shelves4.sdf"
->>>>>>> 85650bfb350dc94fd1a69a7476ea2146005efba4
     ],
     visibility = ["//visibility:public"],
 )
@@ -277,5 +273,34 @@ drake_jupyter_py_binary(
         "//sandbox:rrt",
         "//sandbox:spp",
         "//sandbox:utils",
+    ],
+)
+
+drake_py_library(
+    name = "iris_t_space",
+    srcs = [
+        "iris_t_space.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//bindings/pydrake",
+            "//sandbox:symbolic_parsing_helpers",
+            ],
+)
+
+drake_jupyter_py_binary(
+    name = "example_2d_t_space_clean",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:utils",
+        "//sandbox:t_space_utils",
+        "//sandbox:iris_t_space",
     ],
 )

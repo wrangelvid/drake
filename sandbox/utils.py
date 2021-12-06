@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import meshcat
 
 class PWLinTraj:
         def __init__(self, path, duration):
@@ -73,3 +74,14 @@ def plot(traj, steps, runtime):
     ax.legend(loc='upper center', ncol=data_dims)
     ax.set_ylim([-np.pi, np.pi])
     plt.show()
+
+def meshcat_line(x_start, x_end, width):
+    x_end_shift = x_end.copy()
+    x_end_shift[0:2] += width
+    x_start_shift = x_start.copy()
+    x_start_shift[1:2] += width
+    
+    points = np.array([[x_start, x_end, x_end_shift, x_start_shift]]).reshape(-1,3)
+    triangles = np.array([[0,1,2],[0,2,3]]).reshape(-1,3)
+    mc_geom = meshcat.geometry.TriangularMeshGeometry(points, triangles)
+    return mc_geom
