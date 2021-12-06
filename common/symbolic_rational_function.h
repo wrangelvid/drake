@@ -112,12 +112,16 @@ class RationalFunction  {
   /// Returns an equivalent symbolic expression of this polynomial.
   Expression ToExpression() const;
 
+  /// Set Indeterminates of the numerator and denominator polynomials
+  void SetIndeterminates(const Variables& new_indeterminates);
+
  private:
   // Throws std::exception if an indeterminate of the denominator (numerator,
   // respectively) is a decision variable of the numerator (denominator).
   void CheckIndeterminates() const;
   Polynomial numerator_;
   Polynomial denominator_;
+
 };
 
 RationalFunction operator+(RationalFunction f1, const RationalFunction& f2);
