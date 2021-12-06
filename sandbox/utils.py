@@ -102,10 +102,14 @@ def plot(traj, steps, runtime):
 def meshcat_line(x_start, x_end, width):
     x_end_shift = x_end.copy()
     x_end_shift[0:2] += width
+    x_end_shift2 = x_end.copy()
+    x_end_shift2[0:1] += 0.5*width
     x_start_shift = x_start.copy()
     x_start_shift[1:2] += width
-    
-    points = np.array([[x_start, x_end, x_end_shift, x_start_shift]]).reshape(-1,3)
-    triangles = np.array([[0,1,2],[0,2,3]]).reshape(-1,3)
+    x_start_shift2 = x_start.copy()
+    x_start_shift2[0:1] += 0.5*width
+
+    points = np.array([[x_start, x_end, x_end_shift, x_start_shift, x_start_shift2, x_end_shift2]]).reshape(-1,3)
+    triangles = np.array([[0,1,2],[0,2,3],[0,1,3],[1,2,3], [0,4,5], [0,3,5],]).reshape(-1,3)
     mc_geom = meshcat.geometry.TriangularMeshGeometry(points, triangles)
     return mc_geom
