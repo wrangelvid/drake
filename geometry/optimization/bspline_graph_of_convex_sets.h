@@ -27,6 +27,9 @@ class BsplineTrajectoryThroughUnionOfHPolyhedra {
   std::optional<trajectories::BsplineTrajectory<double>> Solve(
       bool use_rounding = false) const;
 
+  std::optional<trajectories::BsplineTrajectory<double>> SolveVerbose(
+      bool use_rounding = false) const;
+
   int order() const { return order_; }
 
   int max_repetitions() const { return max_repetitions_; }

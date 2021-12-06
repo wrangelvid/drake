@@ -67,17 +67,28 @@ plot_prm_hand = partial(plot_prm, ax=ax, color= 'k')
 
 PRM = prm.PRM( 
             limits,
-            num_points = 300,
+            num_points = 400,
             col_func_handle = collision,
             num_neighbours = 5, 
-            dist_thresh = 0.3,
+            dist_thresh = .5,
             num_col_checks = 10,
             verbose = True,
             plotcallback = plot_prm_hand
             )
 
+PRM.add_start_end(start, goal)
+PRM.plot()
+
+sp_list, sp_length = PRM.find_shortest_path()
+
 for _ in range(2000):
     pos_samp = PRM.sample_node_pos()
-    ax.scatter(pos_samp[0], pos_samp[1], c = 'r', s = 10, alpha= 0.1)
+    ax.scatter(pos_samp[0], pos_samp[1], c = 'k', s = 5, alpha= 0.1)
 
+
+for idx in range(len(sp_list)-1):
+    pt = sp_list[idx]
+    pt2 = sp_list[idx+1]
+    ax.scatter(pt[0],pt[1],s = 20, c= 'r')
+    ax.plot([pt[0], pt2[0]], [pt[1], pt2[1]], c = 'r')
 plt.show()

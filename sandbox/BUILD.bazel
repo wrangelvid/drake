@@ -24,10 +24,10 @@ filegroup(
         "planar_iiwa_dense_collision_welded_gripper.yaml",
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
-        "shelves.sdf",
-        "shelves2.sdf",
-        "shelves3.sdf",
-        "shelves4.sdf",
+        "assets/shelves.sdf",
+        "assets/shelves2.sdf",
+        "assets/shelves3.sdf",
+        "assets/shelves4.sdf",
     ],
     visibility = ["//visibility:public"],
 )
@@ -179,6 +179,15 @@ drake_py_library(
     deps = ["//bindings/pydrake",]
 )
 
+drake_py_library(
+    name = "prm",
+    srcs = [
+        "prm.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//bindings/pydrake",]
+)
+
 drake_jupyter_py_binary(
     name = "2d_rrt_vs_iris",
     add_test_rule = 0,
@@ -189,6 +198,7 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:rrt",
+        "//sandbox:prm",
         "//sandbox:utils"
     ],
 )
@@ -203,6 +213,39 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sandbox:rrt",
+        "//sandbox:prm",
+        "//sandbox:utils",
+        "//sandbox:spp"
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "iiwa_example_two",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:rrt",
+        "//sandbox:prm",
+        "//sandbox:utils",
+        "//sandbox:spp"
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "iiwa_example_three",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:rrt",
+        "//sandbox:prm",
         "//sandbox:utils",
         "//sandbox:spp"
     ],
