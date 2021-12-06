@@ -13,6 +13,12 @@ from pydrake.all import (
 import numpy as np
 
 def set_up_iris_t_space(plant, scene_graph, context, settings = None):
+    
+
+    #hardcoded
+    dReal_polytope_tol = 1e-10
+    starting_vol_eps = 1e-3
+
 
     forward_kin = RationalForwardKinematics(plant)
     query = scene_graph.get_query_output_port().Eval(scene_graph.GetMyContextFromRoot(context))
@@ -63,16 +69,19 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
     Hyperellipsoid.TangentPlane = TangentPlane
 
     def iris_rational_space(query, point, require_containment_points=[], termination_threshold=2e-2, iteration_limit=100):
-        dReal_polytope_tol = .1
-        ellipsoid_epsilon = 1e-1
         dim = plant.num_positions()
         lb = plant.GetPositionLowerLimits()
         rational_lb = forward_kin.ComputeTValue(lb, q_star)
         ub = plant.GetPositionUpperLimits()
         rational_ub = forward_kin.ComputeTValue(ub, q_star)
         volume_of_unit_sphere = 4.0*np.pi/3.0
-        E = Hyperellipsoid(np.eye(3)/ellipsoid_epsilon, point)
-        best_volume = ellipsoid_epsilon**dim * volume_of_unit_sphere
+        
+        E = Hyperellipsoid(np.eye(3)/starting_vol_eps, point)
+
+        best_volume = starting_vol_eps**dim * volume_of_unit_sphere
+        
+
+        max_faces = 10
         
         link_poses_by_body_index_rat_pose = forward_kin.CalcLinkPoses(q_star, 
                                                             plant.world_body().index())
@@ -83,8 +92,8 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
         pairs = inspector.GetCollisionCandidates()
 
         P = HPolyhedron.MakeBox(rational_lb, rational_ub)
-        A = np.vstack((P.A(), np.zeros((10*len(pairs),3))))  # allow up to 10 faces per pair.
-        b = np.concatenate((P.b(), np.zeros(10*len(pairs))))
+        A = np.vstack((P.A(), np.zeros((max_faces*len(pairs),3))))  # allow up to 10 faces per pair.
+        b = np.concatenate((P.b(), np.zeros(max_faces*len(pairs))))
 
         geom_ids = inspector.GetGeometryIds(GeometrySet(inspector.GetAllGeometryIds()), Role.kProximity)
         sets = {geom:MakeFromSceneGraph(query, geom, inspector.GetFrameId(geom)) for geom in geom_ids}
@@ -109,12 +118,18 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
                     X_WB = X_WB_list[int(body_indexes_by_geom_id[geomB])]
                     success, growth, qstar = GrowthVolumeRational(E,
                         X_WA, X_WB,
-                        sets[geomA], sets[geomB], A[:num_faces,:], b[:num_faces] - dReal_polytope_tol, point)
+                        sets[geomA], sets[geomB], 
+                        A[:num_faces,:], b[:num_faces] - dReal_polytope_tol, 
+                        point)
                     if success:
                         print(f"snopt_example={qstar}, growth = {growth}")
                         # Add a face to the polytope
                         A[num_faces,:], b[num_faces] = E.TangentPlane(qstar)
                         num_faces += 1
+                        if num_faces > max_faces:
+                            break
+                        #     A = np.vstack((A, np.zeros((max_faces*len(pairs),3))))  # allow up to 10 faces per pair.
+                        #     b = np.concatenate((b, np.zeros(max_faces*len(pairs))))
                     else:
                         break
 
@@ -122,7 +137,7 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
                     pass
                 
 
-            if any([np.any(A[:num_faces,:] @ t > b[:num_faces]) for t in require_containment_points]):
+            if any([np.any(A[:num_faces,:] @ p > b[:num_faces]) for p in require_containment_points]):
                 print("terminating because a required containment point would have not been contained")
                 break
 
@@ -142,3 +157,6 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
 
         return P
     return iris_rational_space, query, forward_kin
+
+
+     

@@ -42,6 +42,30 @@ def animate(traj, publisher, steps, runtime):
                 going_fwd = True
                 idx +=1
 
+def animate_t(traj, publisher, steps, t_to_q, runtime):
+    #loop
+    idx = 0
+    going_fwd = True
+    time_points = np.linspace(0, traj.end_time(), steps) 
+
+    for _ in range(runtime):
+        #print(idx)
+        q = t_to_q(traj.value(time_points[idx]).reshape(1, -1)).squeeze()
+        publisher(q.reshape(-1,))
+        if going_fwd:
+            if idx + 1 < steps:
+                idx += 1
+            else:
+                going_fwd = False
+                idx -=1
+        else:
+            if idx-1 >= 0:
+                idx -=1
+            else:
+                going_fwd = True
+                idx +=1
+
+
 def plot(traj, steps, runtime):
     #loop
     idx = 0
