@@ -111,7 +111,7 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
             ## Find separating hyperplanes
 
             for geomA, geomB in pairs:
-                print(f"geomA={inspector.GetName(geomA)}, geomB={inspector.GetName(geomB)}")
+                #print(f"geomA={inspector.GetName(geomA)}, geomB={inspector.GetName(geomB)}")
                 # Run snopt at the beginning
                 while True:
                     X_WA = X_WA_list[int(body_indexes_by_geom_id[geomA])]
@@ -122,7 +122,7 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
                         A[:num_faces,:], b[:num_faces] - dReal_polytope_tol, 
                         point)
                     if success:
-                        print(f"snopt_example={qstar}, growth = {growth}")
+                        #print(f"snopt_example={qstar}, growth = {growth}")
                         # Add a face to the polytope
                         A[num_faces,:], b[num_faces] = E.TangentPlane(qstar)
                         num_faces += 1
