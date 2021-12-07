@@ -225,6 +225,7 @@ drake_jupyter_py_binary(
         "//sandbox:prm",
         "//sandbox:rrt",
         "//sandbox:utils",
+        "//sandbox:rrtiris",
     ],
 )
 
@@ -277,6 +278,16 @@ drake_jupyter_py_binary(
 )
 
 drake_py_library(
+    name = "rrtiris",
+    srcs = [
+        "rrtiris.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//bindings/pydrake",
+            ],
+)
+
+drake_py_library(
     name = "iris_t_space",
     srcs = [
         "iris_t_space.py",
@@ -302,5 +313,24 @@ drake_jupyter_py_binary(
         "//sandbox:utils",
         "//sandbox:t_space_utils",
         "//sandbox:iris_t_space",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "example_iiwa_t_space_clean",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:spp",
+        "//sandbox:utils",
+        "//sandbox:t_space_utils",
+        "//sandbox:iris_t_space"
     ],
 )
