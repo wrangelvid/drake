@@ -317,6 +317,26 @@ drake_jupyter_py_binary(
     ],
 )
 
+
+drake_jupyter_py_binary(
+    name = "example_2d_growing_volumes",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:utils",
+        "//sandbox:t_space_utils",
+        "//sandbox:iris_t_space",
+        "//sandbox:rrtiris",
+    ],
+)
+
 drake_jupyter_py_binary(
     name = "example_iiwa_t_space_clean",
     add_test_rule = 0,
