@@ -59,6 +59,7 @@ class RRTIRIS:
         root = IrisNode(region, ellipse)
         root.id = 0
         self.nodes = [root]
+        self.node_ellipses = [ellipse]
         self.node_centers = [self.nodes[0].ellipse.center()] 
         self.node_volumes = [self.nodes[0].ellipse.Volume()]
         self.node_regions = [region]
@@ -119,6 +120,7 @@ class RRTIRIS:
                 child_node = IrisNode(region, ellipse)
                 child_node.id = it + 1
                 self.nodes.append(child_node)
+                self.node_ellipses.append(ellipse)
                 self.node_centers.append(ellipse.center())
                 self.node_volumes.append(ellipse.Volume())
                 self.node_regions.append(region)
@@ -142,9 +144,10 @@ class RRTIRIS:
                 if self.verbose:
                     print("[RRT IRIS] it: {iter} distance to target: {dist: .3f} goalsample prob: {prob: .3f}".format(iter =it, dist = self.distance_to_go, prob = self.goal_sample_rate))
 
-            if self.distance_to_go == 0:
-                break
+            if self.distance_to_go <= 1e-4:
+                return True, self.node_regions, self.node_ellipses
 
+        return False, self.node_regions, self.node_ellipses
         #walk back through tree to get closest node    
         #path = []
         #current_node = self.nodes[self.closest_id]

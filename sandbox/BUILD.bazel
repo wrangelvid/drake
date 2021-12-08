@@ -313,6 +313,7 @@ drake_jupyter_py_binary(
         "//sandbox:utils",
         "//sandbox:t_space_utils",
         "//sandbox:iris_t_space",
+        "//sandbox:rrtiris",
     ],
 )
 
