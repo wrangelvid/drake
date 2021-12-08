@@ -148,19 +148,7 @@ class RRTIRIS:
                 return True, self.node_regions, self.node_ellipses
 
         return False, self.node_regions, self.node_ellipses
-        #walk back through tree to get closest node    
-        #path = []
-        #current_node = self.nodes[self.closest_id]
-        #while current_node.parent is not None:
-        #    current_node = current_node.parent
-        #    path.append(current_node.pos)
-        #
-        #if self.distance_to_go <= self.extend_step_size:
-        #    print('[RRT IRIS] Collision free path found in ', it,' regions')
-        #    return True, path[::-1]
-        #else:
-        #    print('[RRT IRIS] Could not find path in ', it,' regions')
-        #    return False, path[::-1]
+
        
     def get_closest_point_in_regions(self, sample):
         num_regions = len(self.nodes) 

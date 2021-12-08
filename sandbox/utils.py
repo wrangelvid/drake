@@ -177,3 +177,23 @@ def plot_point(loc, radius, mat, vis, marker_id):
                 meshcat.geometry.Sphere(radius), mat)
     vis['markers'][marker_id].set_transform(
                 meshcat.transformations.translation_matrix(loc))
+
+def crossmat(vec): 
+    R = np.zeros((3,3))
+    R[0,1] = -vec[2]
+    R[0,2] = vec[1]
+    R[1,0] = vec[2]
+    R[1,2] = -vec[0]
+    R[2,0] = -vec[1]
+    R[2,1] = vec[0]
+    return R
+
+def normalize(v):
+    norm = np.linalg.norm(v)
+    if norm == 0: 
+       return v
+    return v / norm
+    
+def get_rotation_matrix(axis, theta):
+    R = np.cos(theta)*np.eye(3) + np.sin(theta)*crossmat(axis) + (1-np.cos(theta))*(axis.reshape(-1,1)@axis.reshape(-1,1).T)
+    return R
