@@ -886,6 +886,12 @@ PYBIND11_MODULE(symbolic, m) {
                          doc.Polynomial.SetIndeterminates.doc)
                     .def("__str__",
                          [](const RationalFunction &self) { return fmt::format("{}", self); })
+                     .def(
+                            "Evaluate",
+                            [](const RationalFunction &self, const Environment::map &env) {
+                                return self.Evaluate(Environment{env});
+                            },
+                            doc.Polynomial.Evaluate.doc)
                             // Arithmetic
                     .def(-py::self)
                     .def(py::self + py::self)
@@ -912,7 +918,7 @@ PYBIND11_MODULE(symbolic, m) {
                             // Logical comparison
                     .def(py::self == py::self)
                     .def("ToExpression", &RationalFunction::ToExpression)
-                    .def("EqualTo", &RationalFunction::EqualTo, py::arg("other"));
+                    .def("EqualTo", &RationalFunction::EqualTo);
 
 }
 }  // namespace pydrake

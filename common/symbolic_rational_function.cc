@@ -27,6 +27,11 @@ bool RationalFunction::EqualTo(const RationalFunction& f) const {
          denominator_.EqualTo(f.denominator());
 }
 
+double RationalFunction::Evaluate(const Environment& env) const {
+        return numerator_.Evaluate(env)/denominator_.Evaluate(env);
+    }
+
+
 Formula RationalFunction::operator==(const RationalFunction& f) const {
   return denominator_ * f.numerator() == numerator_ * f.denominator();
 }

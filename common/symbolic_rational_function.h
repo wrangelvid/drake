@@ -59,6 +59,14 @@ class RationalFunction  {
    */
   explicit RationalFunction(double c);
 
+  /// Evaluates this polynomial under a given environment @p env.
+  ///
+  /// @throws std::exception if there is a variable in this polynomial whose
+  /// assignment is not provided by @p env.
+  double Evaluate(const Environment& env) const;
+
+
+
   ~RationalFunction() = default;
 
   /// Getter for the numerator.
