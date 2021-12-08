@@ -1,6 +1,8 @@
+from operator import pos
 import numpy as np
 from numpy.core.fromnumeric import argmin
-from pydrake.all import (MathematicalProgram, Variable, HPolytope, le) 
+from numpy.random.mtrand import seed
+from pydrake.all import (MathematicalProgram, Variable, HPolyhedron, le, SnoptSolver, Solve) 
 
 class IrisNode:
     def __init__(self, region, ellipse, parent = None):
@@ -24,24 +26,13 @@ class RRTIRIS:
                  sample_collision_free = False
                  ):
 
-
+        self.dim = len(start)
         #col_check(pos) == True -> in collision!
         self.in_collision = col_func_handle
         self.check_col = True
-        
-        if self.check_col and self.in_collision(start):
-            print("[RRT ERROR] Start position is in collision")
-            raise NotImplementedError
+        self.sample_collision_free = sample_collision_free
+        self.iris_handle = iris_handle
 
-        if self.check_col and self.in_collision(goal):
-            print("[RRT ERROR] Goal position is in collision")
-            raise NotImplementedError
-
-        region, ellipse = iris_handle(seed = start)
-        root = IrisNode(region, ellipse)
-        root.id = 0
-        self.nodes = [root]
-        self.node_pos = [self.nodes[0].pos] 
         self.start = start
         self.goal = goal
         self.limits = limits
@@ -55,22 +46,29 @@ class RRTIRIS:
         self.verbose = verbose
         self.plotcallback = plotcallback
         self.do_plot = True if self.plotcallback is not None else False
-        self.sample_collision_free =sample_collision_free
+
+        if self.check_col and self.in_collision(start):
+            print("[RRT ERROR] Start position is in collision")
+            raise NotImplementedError
+
+        if self.check_col and self.in_collision(goal):
+            print("[RRT ERROR] Goal position is in collision")
+            raise NotImplementedError
+
+        region, ellipse = self.iris_handle(start)
+        root = IrisNode(region, ellipse)
+        root.id = 0
+        self.nodes = [root]
+        self.node_ellipses = [ellipse]
+        self.node_centers = [self.nodes[0].ellipse.center()] 
+        self.node_volumes = [self.nodes[0].ellipse.Volume()]
+        self.node_regions = [region]
+
+        if self.do_plot:
+            self.plotcallback(region, start, start, len(self.nodes))
         
-        self.dim = len(start)
         self.distance_to_go = 1e9
 
-       
-
-    def get_closest_node_in_regions(self, pos):
-        problem = self.build_closest_points_problem(pos)
-        sol = problem.solve()
-        points = sol.x.reshape(-1,self.dim)
-        dists = np.linalg.norm(pos.reshape(-1, self.dim) - points, axis = 1)
-        idx = np.argmin(dists)
-        closest_point_in_region = points[idx, :] 
-        min_dist = dists[idx]
-        return 
 
     def sample_node_pos(self, collision_free = True, MAXIT = 1e4):
         rand = np.random.rand()
@@ -79,6 +77,7 @@ class RRTIRIS:
         
         rand = np.random.rand(self.dim)
         pos_samp = self.min_pos + rand*self.min_max_diff 
+      
         if self.sample_collision_free:
             good_sample = not self.in_collision(pos_samp) if collision_free else True
         else: 
@@ -97,30 +96,46 @@ class RRTIRIS:
         return pos_samp
 
     def check_region(self, region, ellipse):
-        return True
+        #use ellipses to check regions for similarity
+        #compare center and volume
+        vol = ellipse.Volume()
+        center_origin = np.linalg.norm(ellipse.center())
+        min_vol_diff = np.min(np.abs(np.array(self.node_volumes) - vol))
+        if min_vol_diff< 0.001 or center_origin<1e-7:
+            return False
+        else:
+            return True
 
     def run(self, n_it):
 
         for it in range(n_it):
-            if it%3 == 0:
-                print(it)
+            print(it)
             pos_samp = self.sample_node_pos()
-            nearest_id, seed_point = self.get_closest_node_in_regions(pos_samp) 
+            seed_point, min_dist, closest_points, nearest_id = self.get_closest_point_in_regions(pos_samp) 
+            #print('[RRT IRIS] Pos_samp', pos_samp, ' seed ', seed_point, ' dist ', min_dist)
+            
             parent_node = self.nodes[nearest_id]
-            region, ellipse = self.iris_handle(seed = seed_point)
+            region, ellipse = self.iris_handle(seed_point)
             if self.check_region(region, ellipse):
                 child_node = IrisNode(region, ellipse)
                 child_node.id = it + 1
                 self.nodes.append(child_node)
+                self.node_ellipses.append(ellipse)
+                self.node_centers.append(ellipse.center())
+                self.node_volumes.append(ellipse.Volume())
+                self.node_regions.append(region)
                 child_node.parent = parent_node
                 
-                dist_to_target = np.linalg.norm(self.goal - seed_point)
+                _, dist_to_target, _, _ = self.get_closest_point_in_regions(self.goal)
+
+                print(dist_to_target) 
+                if self.do_plot:
+                    self.plotcallback(region, seed_point, pos_samp, len(self.nodes))   
             else:
                 print('[RRT IRIS] Region check failed')
             
 
-            if self.do_plot:
-                self.plotcallback(parent_node, child_node, pos_samp, it)
+            
 
             if dist_to_target<self.distance_to_go:
                 self.distance_to_go = dist_to_target
@@ -129,33 +144,41 @@ class RRTIRIS:
                 if self.verbose:
                     print("[RRT IRIS] it: {iter} distance to target: {dist: .3f} goalsample prob: {prob: .3f}".format(iter =it, dist = self.distance_to_go, prob = self.goal_sample_rate))
 
-            if self.distance_to_go< self.extend_step_size:
-                break
+            if self.distance_to_go <= 1e-4:
+                return True, self.node_regions, self.node_ellipses
 
+        return False, self.node_regions, self.node_ellipses
         #walk back through tree to get closest node    
-        path = []
-        current_node = self.nodes[self.closest_id]
-        while current_node.parent is not None:
-            current_node = current_node.parent
-            path.append(current_node.pos)
-        
-        if self.distance_to_go <= self.extend_step_size:
-            print('[RRT IRIS] Collision free path found in ', it,' regions')
-            return True, path[::-1]
-        else:
-            print('[RRT IRIS] Could not find path in ', it,' regions')
-            return False, path[::-1]
+        #path = []
+        #current_node = self.nodes[self.closest_id]
+        #while current_node.parent is not None:
+        #    current_node = current_node.parent
+        #    path.append(current_node.pos)
+        #
+        #if self.distance_to_go <= self.extend_step_size:
+        #    print('[RRT IRIS] Collision free path found in ', it,' regions')
+        #    return True, path[::-1]
+        #else:
+        #    print('[RRT IRIS] Could not find path in ', it,' regions')
+        #    return False, path[::-1]
        
-    def build_closest_points_problem(self, sample):
-
+    def get_closest_point_in_regions(self, sample):
         num_regions = len(self.nodes) 
         prog = MathematicalProgram()
-        x = prog.NewContinuousVariables(self.dim*num_regions, 'x')  
-        cost = x - np.tile(sample, (num_regions, 1))
+        x = prog.NewContinuousVariables(self.dim*num_regions, 'x')
+        prog.SetInitialGuess(x, np.array(self.node_centers).reshape(-1,) )  
+        cost = x - np.tile(sample, (1, num_regions)).squeeze()
         cost = cost@cost.T
+        prog.AddCost(cost)
         for idx in range(num_regions):
             A = self.nodes[idx].region.A()
             b = self.nodes[idx].region.b()
-            prog.AddConstraint(le(A@x[idx*self.dim:(idx + 1)*self.dim]-b, 0))
-        
-        return prog
+            prog.AddConstraint(le(A@x[idx*self.dim:(idx + 1)*self.dim], b))
+        solver = SnoptSolver()
+        result = solver.Solve(prog)
+        x_sol = result.GetSolution(x).reshape(num_regions, self.dim)
+        dists = np.linalg.norm(x_sol-sample, axis = 1)
+        closest = np.argmin(dists)
+        min_dist = dists[closest]
+        min_point = x_sol[closest, :]
+        return min_point, min_dist, x_sol, closest

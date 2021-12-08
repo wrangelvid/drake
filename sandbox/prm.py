@@ -107,7 +107,7 @@ class PRM:
         for node_idx in [-2, -1]:
             edges = []
             edge_dist = []
-            dists, idxs = self.nodes_kd.query(self.nodes[node_idx, :], k= self.num_neighbours, p= 2, distance_upper_bound = self.dist_thresh ) 
+            dists, idxs = self.nodes_kd.query(self.nodes[node_idx, :], k= self.num_neighbours*5, p= 2, distance_upper_bound = self.dist_thresh*2 ) 
             #linesearch connection for collision
             for step in range(len(idxs)):
                 nearest_idx =idxs[step]

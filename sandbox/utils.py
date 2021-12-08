@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import meshcat
+from pydrake.all import (MathematicalProgram, Variable, HPolyhedron, le, SnoptSolver) 
+from functools import partial
+import mcubes
 
 class PWLinTraj:
         def __init__(self, path, duration):
@@ -113,3 +116,64 @@ def meshcat_line(x_start, x_end, width):
     triangles = np.array([[0,1,2],[0,2,3],[0,1,3],[1,2,3], [0,4,5], [0,3,5],]).reshape(-1,3)
     mc_geom = meshcat.geometry.TriangularMeshGeometry(points, triangles)
     return mc_geom
+
+def rgb_to_hex(rgb):
+    return '0x%02x%02x%02x' % rgb
+
+def get_AABB_limits(hpoly, dim = 3):
+    #im using snopt, sue me
+    max_limits = []
+    min_limits = []
+    A = hpoly.A()
+    b = hpoly.b()
+
+    for idx in range(dim):
+        aabbprog = MathematicalProgram()
+        x = aabbprog.NewContinuousVariables(dim, 'x')
+        cost = x[idx]
+        aabbprog.AddCost(cost)
+        aabbprog.AddConstraint(le(A@x,b))
+        solver = SnoptSolver()
+        result = solver.Solve(aabbprog)
+        min_limits.append(result.get_optimal_cost()-0.01)
+        aabbprog = MathematicalProgram()
+        x = aabbprog.NewContinuousVariables(dim, 'x')
+        cost = -x[idx]
+        aabbprog.AddCost(cost)
+        aabbprog.AddConstraint(le(A@x,b))
+        solver = SnoptSolver()
+        result = solver.Solve(aabbprog)
+        max_limits.append(-result.get_optimal_cost() + 0.01)
+    return max_limits, min_limits
+
+def plot_3d_poly(region, resolution, vis, name, mat = None, verbose = False):
+    
+    def inpolycheck(q0,q1,q2, A, b):
+        q = np.array([q0, q1, q2])
+        res = np.min(1.0*(A@q-b<=0))
+        #print(res)
+        return res
+    
+    aabb_max, aabb_min = get_AABB_limits(region)
+    if verbose:
+        print('AABB:', aabb_min, aabb_max)
+    col_hand = partial(inpolycheck, A=region.A(), b=region.b())
+    vertices, triangles = mcubes.marching_cubes_func(tuple(aabb_min), 
+                                                     tuple(aabb_max),
+                                                     resolution, 
+                                                     resolution, 
+                                                     resolution, 
+                                                     col_hand, 
+                                                     0.5)
+    if mat is None:
+        mat = meshcat.geometry.MeshLambertMaterial(color=0x000000 , wireframe=True)
+        mat.opacity = 0.3
+    vis[name].set_object(
+            meshcat.geometry.TriangularMeshGeometry(vertices, triangles),
+            mat)
+
+def plot_point(loc, radius, mat, vis, marker_id):
+    vis['markers'][marker_id].set_object(
+                meshcat.geometry.Sphere(radius), mat)
+    vis['markers'][marker_id].set_transform(
+                meshcat.transformations.translation_matrix(loc))
