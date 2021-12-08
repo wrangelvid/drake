@@ -212,6 +212,8 @@ ConfigurationSpaceCollisionFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
                                                      obstacle->get_id()))
                                 ->second->a;
           Eigen::Vector3d p_AC;
+          // find the positions of the center of B (which are expressed in frameB)
+          // expressed in the frame A
           rational_forward_kinematics_.plant().CalcPointsPositions(
               *context,
               rational_forward_kinematics_.plant()
