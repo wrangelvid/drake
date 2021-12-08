@@ -912,7 +912,8 @@ PYBIND11_MODULE(symbolic, m) {
                             // Logical comparison
                     .def(py::self == py::self)
                     .def("ToExpression", &RationalFunction::ToExpression)
-                    .def("EqualTo", &RationalFunction::EqualTo);
+                    .def("EqualTo", &RationalFunction::EqualTo, py::arg("other"));
+
 }
 }  // namespace pydrake
 }  // namespace drake
