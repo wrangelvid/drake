@@ -217,6 +217,12 @@ def EvaluatePlanePair(plane_pair, eval_dict):
         a_res.append(ai.Evaluate(eval_dict))
     return (np.array(a_res), plane_pair[1].Evaluate(eval_dict))
 
+def uniform_shrink_iris_region(region, var_epsilon):
+    return HPolyhedron(region.A(), region.b()-var_epsilon*np.ones_like(region.b()))
+
+def uniform_shrink_iris_region_list(region_list, var_epsilon):
+    return [uniform_shrink_iris_region(r, var_epsilon) for r in region_list]
+
 class RegionCertifier:
     def __init__(self, plant, scene_graph, context):
         self.query = scene_graph.get_query_output_port().Eval(scene_graph.GetMyContextFromRoot(context))
@@ -242,7 +248,7 @@ class RegionCertifier:
         self.X_WA_multilinear_list = [(r.rotation().copy(), r.translation().copy()) for r in
                                  self.link_poses_by_body_index_multilinear_pose]
 
-    def construct_first_order_separating_hyperplane(self, prog, t, order=2, plane_name=''):
+    def construct_separating_hyperplane_of_order(self, prog, t, order=2, plane_name=''):
         if plane_name != '':
             plane_name = '_' + plane_name
         t_basis = sym.MonomialBasis(t, order)
@@ -287,7 +293,6 @@ class RegionCertifier:
         constraint_poly.SetIndeterminates(sym.Variables(t))
         tol = 1e-3
         prog.AddEqualityConstraintBetweenPolynomials(constraint_poly, p - tol)
-        #     prog.AddSosConstraint(p-constraint_poly)
         return prog, (constraint_poly, p - tol)
 
 
@@ -333,7 +338,7 @@ class RegionCertifier:
     def add_pair_constraint(self, geomA, geomB, prog, poly_to_cert,
                             lagrange_mult_degree=2, var_epsilon=None):
         VPolyA, VPolyB = self.VPolyhedronSets[geomA], self.VPolyhedronSets[geomB]
-        prog, a_plane_poly, b_plane_poly, dec_vars = self.construct_first_order_separating_hyperplane(prog, self.t_kin)
+        prog, a_plane_poly, b_plane_poly, dec_vars = self.construct_separating_hyperplane_of_order(prog, self.t_kin)
 
         R_WA, p_WA = self.X_WA_multilinear_list[int(self.body_indexes_by_geom_id[geomA])]
         R_WB, p_WB = self.X_WA_multilinear_list[int(self.body_indexes_by_geom_id[geomB])]
