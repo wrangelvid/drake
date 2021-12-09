@@ -51,6 +51,8 @@ import symbolic_parsing_helpers as symHelpers
 from pydrake.all import RationalForwardKinematics, FindBodyInTheMiddleOfChain
 from pydrake.all import GenerateMonomialBasisOrderAllUpToOneExceptOneUpToTwo, GenerateMonomialBasisWithOrderUpToOne
 
+import scipy
+import utils
 
 
 def set_up_iris_t_space(plant, scene_graph, context, settings = None):
@@ -136,7 +138,13 @@ def set_up_iris_t_space(plant, scene_graph, context, settings = None):
         A = np.vstack((P.A(), np.zeros((max_faces*len(pairs),3))))  # allow up to 10 faces per pair.
         b = np.concatenate((P.b(), np.zeros(max_faces*len(pairs))))
 
-        geom_ids = inspector.GetGeometryIds(GeometrySet(inspector.GetAllGeometryIds()), Role.kProximity)
+        # geom_ids = inspector.GetGeometryIds(GeometrySet(inspector.GetAllGeometryIds()), Role.kProximity)
+        pair_set = set()
+        for p in pairs:
+            pair_set.add(p[0])
+            pair_set.add(p[1])
+        geom_ids = inspector.GetGeometryIds(GeometrySet(list(pair_set)))
+
         sets = {geom:MakeFromSceneGraph(query, geom, inspector.GetFrameId(geom)) for geom in geom_ids}
         body_indexes_by_geom_id = {geom:
                                 plant.GetBodyFromFrameId(inspector.GetFrameId(geom)).index() for geom in geom_ids} 
@@ -206,7 +214,6 @@ def MakeFromHPolyhedronOrEllipseSceneGraph(query, geom, expressed_in=None):
     return HPolyhedron(query, geom, expressed_in)
 def MakeFromVPolytopeOrEllipseSceneGraph(query, geom, expressed_in=None):
     shape = query.inspector().GetShape(geom)
-    print(geom)
     if isinstance(shape, (Sphere, Ellipsoid)):
         return Hyperellipsoid(query, geom, expressed_in)
     return VPolytope(query, geom, expressed_in)
@@ -247,6 +254,24 @@ class RegionCertifier:
                                                                                                       plant.world_body().index())
         self.X_WA_multilinear_list = [(r.rotation().copy(), r.translation().copy()) for r in
                                  self.link_poses_by_body_index_multilinear_pose]
+
+        def convert_RationalForwardPoseList_to_TransformExpressionList(pose_list):
+            ret = []
+            for p in pose_list:
+                ret.append(p.asRigidTransformExpr())
+            return ret
+
+        X_WA_list = convert_RationalForwardPoseList_to_TransformExpressionList(link_poses_by_body_index_rat_pose)
+
+        # t_space_vertex_position_by_geom_id = {}
+        # for geom in geom_ids:
+        #     VPoly = VPolyhedronSets[geom]
+        #     num_verts = VPoly.vertices().shape[1]
+        #     X_WA = X_WA_list[int(body_indexes_by_geom_id[geom])]
+        #     R_WA = X_WA.rotation().matrix()
+        #     p_WA = X_WA.translation()
+        #     vert_pos = R_WA @ (VPoly.vertices()) + np.repeat(p_WA[:, np.newaxis], num_verts, 1)
+        #     t_space_vertex_position_by_geom_id[geom] = vert_pos
 
     def construct_separating_hyperplane_of_order(self, prog, t, order=2, plane_name=''):
         if plane_name != '':
@@ -291,7 +316,7 @@ class RegionCertifier:
             prog.AddSosConstraint(lagrange_poly)
             constraint_poly += lagrange_poly * sym.Polynomial(b[i] - var_epsilon[i] - A[i, :] @ t)
         constraint_poly.SetIndeterminates(sym.Variables(t))
-        tol = 1e-3
+        tol = 1e-5
         prog.AddEqualityConstraintBetweenPolynomials(constraint_poly, p - tol)
         return prog, (constraint_poly, p - tol)
 
@@ -313,25 +338,40 @@ class RegionCertifier:
                 dens[i, j] = vertex_pos[i, j].denominator()
                 nums[i, j] = vertex_pos[i, j].numerator()
 
+        unique_dens_c = [[sym.Polynomial(1)] for _ in range(dens.shape[1])]
+        col_den = [sym.Polynomial(1) for _ in range(dens.shape[1])]
         for c in range(dens.shape[1]):
-            for r in range(dens.shape[0] - 1):
-                if not dens[r, c].EqualTo(dens[r + 1, c]):
-                    raise ValueError("problem")
+            for r in range(dens.shape[0]):
+                is_unique = True
+                for d in unique_dens_c[c]:
+                    is_unique = False if dens[r, c].EqualTo(d) else True
+                    if not is_unique:
+                        break
+                if is_unique:
+                    unique_dens_c[c].append(dens[r, c])
 
-        #     plane_rats = a_plane_poly.dot(vertex_pos)
+            for d in unique_dens_c[c]:
+                col_den[c] *= d
+
+        for c in range(nums.shape[1]):
+            for r in range(nums.shape[0]):
+                for d in unique_dens_c[c]:
+                    if not dens[r, c].EqualTo(d):
+                        nums[r, c] *= d
+
         plane_polys = np.array([None for _ in range(vertex_pos.shape[1])])
         for i in range(vertex_pos.shape[1]):
-            #         p.SetIndeterminates(sym.Variables(t))
-
             if leq_or_geq == 'leq':
                 # a^Tx + b <= -1 -> -(a^Tx+b+1)>=0
-                plane_polys[i] = (-a_plane_poly.dot(nums[:, i]) - (b_plane_poly + 1) * (dens[:, i].sum()))
+                plane_polys[i] = -a_plane_poly.dot(nums[:, i]) - (b_plane_poly + 1) * (col_den[i])
+
             elif leq_or_geq == 'geq':
                 # a^Tx+b >= 1 -> a^Tx+b -1 >= 0
-                plane_polys[i] = (a_plane_poly.dot(nums[:, i]) + (b_plane_poly - 1) * (dens[:, i].sum()))
+                plane_polys[i] = a_plane_poly.dot(nums[:, i]) + (b_plane_poly - 1) * (col_den[i])
             else:
                 raise ValueError("leq_or_geq arg must be leq or geq not {}".format(leq_or_geq))
             plane_polys[i].SetIndeterminates(sym.Variables(t))
+
         return plane_polys
 
 
@@ -405,7 +445,7 @@ class RegionCertifier:
         print(np.linalg.norm(result.GetSolution(dec_vars)))
 
         plane_polys = self.extract_planes(plane_pairs, result)
-        s_prod_pairs = self.extract_planes(s_prod_pairs, result)
+        s_prod_pairs = self.extract_s_prod_pairs(s_prod_pairs, result)
         return result, plane_polys, s_prod_pairs
 
 
@@ -452,4 +492,67 @@ class RegionCertifier:
                 cur_list.append((constraint_poly_evaled, vert_poly_evaled))
             evaled_pairs[k] = cur_list
         return evaled_pairs
-     
+
+class PlaneVisualizer():
+    def __init__(self, t_kin, vis):
+        self.vis = vis
+        self.t_kin = t_kin
+        self.x = np.linspace(-1, 1, 3)
+        self.y = np.linspace(-1, 1, 3)
+        self.verts = []
+
+        for idxx in range(len(self.x)):
+            for idxy in range(len(self.y)):
+               self. verts.append(np.array([self.x[idxx], self.y[idxy]]))
+
+        self.tri = scipy.spatial.Delaunay(self.verts)
+        self.plane_triangles = self.tri.simplices
+        self.plane_verts = self.tri.points[:, :]
+        self.plane_verts = np.concatenate((self.plane_verts, 0 *self. plane_verts[:, 0].reshape(-1, 1)), axis=1)
+
+    def transform(self, a, b, p1, p2, plane_verts, plane_triangles):
+        alpha = (-b - a.T @ p1) / (a.T @ (p2 - p1))
+        offset = alpha * (p2 - p1) + p1
+        z = np.array([0, 0, 1])
+        crossprod = np.cross(utils.normalize(a), z)
+        if np.linalg.norm(crossprod) <= 1e-4:
+            R = np.eye(3)
+        else:
+            ang = np.arcsin(np.linalg.norm(crossprod))
+            axis = utils.normalize(crossprod)
+            R = utils.get_rotation_matrix(axis, -ang)
+
+        verts_tf = (R @ plane_verts.T).T + offset
+        return verts_tf
+
+    def transform_at_t(self, cur_t, a_poly, b_poly, p1_rat, p2_rat):
+        eval_dict = dict(zip(sym.Variables(self.t_kin), cur_t))
+        a, b = EvaluatePlanePair((a_poly, b_poly), eval_dict)
+        #     print(f"{a}, {b}")
+        p1 = np.array([p.Evaluate(eval_dict) for p in p1_rat])
+        p2 = np.array([p.Evaluate(eval_dict) for p in p2_rat])
+        return self.transform(a, b, p1, p2, self.plane_verts, self.plane_triangles), p1, p2
+
+    def transform_plane_geom_id(self, geomA, geomB, planes_dict, cur_t):
+        vA = self.t_space_vertex_position_by_geom_id[geomA][:, 0]
+        vB = self.t_space_vertex_position_by_geom_id[geomB][:, 0]
+        a_poly, b_poly = planes_dict[(geomA, geomB)]
+        return self.transform_at_t(cur_t, a_poly, b_poly, vA, vB)
+
+    def plot_plane_geom_id(self, geomA, geomB, planes_dict, cur_t):
+        verts_tf, p1, p2 = self.transform_plane_geom_id(geomA, geomB, planes_dict, cur_t)
+
+        mat = meshcat.geometry.MeshLambertMaterial(color=utils.rgb_to_hex((255, 0, 0)), wireframe=False)
+        mat.opacity = 0.5
+        self.vis["plane"][f"{geomA.get_value()}, {geomB.get_value()}"].set_object(
+            meshcat.geometry.TriangularMeshGeometry(verts_tf, self.plane_triangles),
+            mat)
+
+        mat.opacity = 1.0
+        utils.plot_point(loc=p1, radius=0.05, mat=mat, vis=self.vis["plane"][f"{geomA.get_value()}, {geomB.get_value()}"],
+                         marker_id='p1')
+        mat = meshcat.geometry.MeshLambertMaterial(color=utils.rgb_to_hex((255, 255, 0)), wireframe=False)
+        mat.opacity = 1.0
+        utils.plot_point(loc=p2, radius=0.05, mat=mat, vis=self.vis["plane"][f"{geomA.get_value()}, {geomB.get_value()}"],
+                         marker_id='p2')
+
