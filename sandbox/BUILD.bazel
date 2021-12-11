@@ -302,7 +302,26 @@ drake_py_library(
 )
 
 drake_jupyter_py_binary(
-    name = "example_2d_t_space_clean",
+    name = "pinball_example_2d",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:iris_t_space",
+        "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:rrtiris",
+        "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:t_space_utils",
+        "//sandbox:utils",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "pinball_example_2d_clean",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
