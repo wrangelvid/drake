@@ -321,6 +321,25 @@ drake_jupyter_py_binary(
 )
 
 drake_jupyter_py_binary(
+    name = "example_for_tobia",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sandbox:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sandbox:iris_t_space",
+        "//sandbox:prm",
+        "//sandbox:rrt",
+        "//sandbox:rrtiris",
+        "//sandbox:symbolic_parsing_helpers",
+        "//sandbox:t_space_utils",
+        "//sandbox:utils",
+    ],
+)
+
+drake_jupyter_py_binary(
     name = "pinball_example_2d_clean",
     add_test_rule = 0,
     data = [
