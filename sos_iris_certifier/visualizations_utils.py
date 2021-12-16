@@ -4,23 +4,55 @@ import meshcat
 from pydrake.all import (MathematicalProgram, Variable, HPolyhedron, le, SnoptSolver) 
 from functools import partial
 import mcubes
+from pydrake.all import RotationMatrix, RigidTransform
+import colorsys
+import itertools
+from fractions import Fraction
+
+def infinite_hues():
+    yield Fraction(0)
+    for k in itertools.count():
+        i = 2**k # zenos_dichotomy
+        for j in range(1,i,2):
+            yield Fraction(j,i)
+
+def hue_to_hsvs(h: Fraction):
+    # tweak values to adjust scheme
+    for s in [Fraction(6,10)]:
+        for v in [Fraction(6,10), Fraction(9,10)]:
+            yield (h, s, v)
+
+def rgb_to_css(rgb) -> str:
+    uint8tuple = map(lambda y: int(y*255), rgb)
+    return tuple(uint8tuple)#"({},{},{})".format(*uint8tuple)
+
+def css_to_html(css):
+    return f"<text style=background-color:{css}>&nbsp;&nbsp;&nbsp;&nbsp;</text>"
+
+def n_colors(n=33):
+    hues = infinite_hues()
+    hsvs = itertools.chain.from_iterable(hue_to_hsvs(hue) for hue in hues)
+    rgbs = (colorsys.hsv_to_rgb(*hsv) for hsv in hsvs)
+    csss = (rgb_to_css(rgb) for rgb in rgbs)
+    to_ret = list(itertools.islice(csss, n))
+    return to_ret #[(float(c) for c in it) for it in to_ret]
 
 class PWLinTraj:
-        def __init__(self, path, duration):
-            self.path = path
-            self.duration = duration
-            self.num_waypoints = len(self.path)
-            
-        def value(self, time):
-            prog_frac = np.clip(time/self.duration, a_min = 0, a_max = 0.99999)*(self.num_waypoints-1)
-            prog_int = int(prog_frac)
-            prog_part = prog_frac-prog_int
-            wp1 = self.path[prog_int]
-            wp2 = self.path[prog_int+1]
-            return wp1 + prog_part*(wp2-wp1)
-        
-        def end_time(self,):
-            return self.duration
+    def __init__(self, path, duration):
+        self.path = path
+        self.duration = duration
+        self.num_waypoints = len(self.path)
+
+    def value(self, time):
+        prog_frac = np.clip(time/self.duration, a_min = 0, a_max = 0.99999)*(self.num_waypoints-1)
+        prog_int = int(prog_frac)
+        prog_part = prog_frac-prog_int
+        wp1 = self.path[prog_int]
+        wp2 = self.path[prog_int+1]
+        return wp1 + prog_part*(wp2-wp1)
+
+    def end_time(self,):
+        return self.duration
 
 def animate(traj, publisher, steps, runtime):
     #loop
@@ -178,6 +210,7 @@ def plot_point(loc, radius, mat, vis, marker_id):
     vis['markers'][marker_id].set_transform(
                 meshcat.transformations.translation_matrix(loc))
 
+
 def crossmat(vec): 
     R = np.zeros((3,3))
     R[0,1] = -vec[2]
@@ -197,3 +230,34 @@ def normalize(v):
 def get_rotation_matrix(axis, theta):
     R = np.cos(theta)*np.eye(3) + np.sin(theta)*crossmat(axis) + (1-np.cos(theta))*(axis.reshape(-1,1)@axis.reshape(-1,1).T)
     return R
+
+
+def plot_regions(vis, regions, ellipses):
+    for i, region in enumerate(regions):
+        c1 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
+        c2 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
+        c3 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
+        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex((c1, c2, c3)), wireframe=True)
+        mat.opacity = 0.5
+        plot_3d_poly(region=region,
+                           resolution=30,
+                           vis=vis['iris']['regions'],
+                           name=str(i),
+                           mat=mat)
+
+        C = ellipses[i].A()  # [:, (0,2,1)]
+        d = ellipses[i].center()  # [[0,2,1]]
+        radii, R = np.linalg.eig(C.T @ C)
+        R[:, 0] = R[:, 0] * np.linalg.det(R)
+        Rot = RotationMatrix(R)
+
+        transf = RigidTransform(Rot, d)
+        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex((c1, c2, c3)), wireframe=True)
+        mat.opacity = 0.15
+        vis['iris']['ellipses'][str(i)].set_object(
+            meshcat.geometry.Ellipsoid(np.divide(1, np.sqrt(radii))),
+            mat)
+
+        vis['iris']['ellipses'][str(i)].set_transform(transf.GetAsMatrix4())
+
+    return vis

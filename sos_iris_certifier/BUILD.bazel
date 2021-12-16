@@ -49,6 +49,8 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sos_iris_certifier:certified_iris_generator",
+        "//sos_iris_certifier:iris_utils",
+        "//sos_iris_certifier:visualizations_utils",
     ],
 )
 
