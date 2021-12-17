@@ -13,6 +13,24 @@ import pydrake.symbolic as sym
 import iris_utils
 import time
 from joblib import Parallel, delayed
+from contextlib import contextmanager
+import logging
+
+
+
+@contextmanager
+def _log_time_usage(prefix=""):
+    '''log the time usage in a code block
+    prefix: the prefix text to show
+    '''
+    start = time.time()
+    try:
+        yield
+    finally:
+        end = time.time()
+        elapsed_seconds = float("%.4f" % (end - start))
+        print(f'{prefix}: {elapsed_seconds}')
+        # logging.debug('%s: elapsed seconds: %s', prefix, elapsed_seconds)
 
 class CertifiedIrisRegionGenerator():
     def __init__(self, diagram, plant, scene_graph, **kwargs):
@@ -197,41 +215,45 @@ class CertifiedIrisRegionGenerator():
         :param penalize_coeffs: whether to add penalty on plane weights
         :return:
         """
-        if self.regions is None:
-            raise ValueError("generate iris regions before attempting certification")
+        with _log_time_usage("Total time to intialize: "):
+            if self.regions is None:
+                raise ValueError("generate iris regions before attempting certification")
 
-        # create one program for each region
-        region_to_prog_map = dict.fromkeys(self.regions)
-        max_faces = 0
-        for r in region_to_prog_map:
-            prog = MathematicalProgram()
-            prog.AddIndeterminates(self.forward_kin.t())
-            region_to_prog_map[r] = prog
-            max_faces = np.max([max_faces, r.b().shape[0]])
+            # create one program for each region
+            with _log_time_usage("time to create region to program map: "):
+                region_to_prog_map = dict.fromkeys(self.regions)
+                max_faces = 0
+                for r in region_to_prog_map:
+                    prog = MathematicalProgram()
+                    prog.AddIndeterminates(self.forward_kin.t())
+                    region_to_prog_map[r] = prog
+                    max_faces = np.max([max_faces, r.b().shape[0]])
 
-        # initialize hyperplane per collision pair
-        collision_pair_to_plane_map = dict.fromkeys(self.pairs)
-        collision_pair_to_positive_constraint_map = dict.fromkeys(self.pairs)
-        for pair in self.pairs:
-            (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) =\
-                self.initialize_separating_hyperplanes_polynomials(*pair, plane_order=-plane_order)
-            collision_pair_to_plane_map[pair] = (a_poly, b_poly)
-            collision_pair_to_positive_constraint_map[pair] = (plane_constraint_polynomials_A, plane_constraint_polynomials_B)
-            # add the plane as a decision variable to the program
-            for r in region_to_prog_map:
-                self.add_plane_to_prog(region_to_prog_map[r], a_vars, b_vars, penalize_coeffs = penalize_coeffs)
+            # initialize hyperplane per collision pair
+            with _log_time_usage("time to create collision pair to plane map: "):
+                collision_pair_to_plane_map = dict.fromkeys(self.pairs)
+                collision_pair_to_positive_constraint_map = dict.fromkeys(self.pairs)
+                for pair in self.pairs:
+                    (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) =\
+                        self.initialize_separating_hyperplanes_polynomials(*pair, plane_order=-plane_order)
+                    collision_pair_to_plane_map[pair] = (a_poly, b_poly)
+                    collision_pair_to_positive_constraint_map[pair] = (plane_constraint_polynomials_A, plane_constraint_polynomials_B)
+                    # add the plane as a decision variable to the program
+                    for r in region_to_prog_map:
+                        self.add_plane_to_prog(region_to_prog_map[r], a_vars, b_vars, penalize_coeffs = penalize_coeffs)
 
-        # initialize the lagrange multipliers by polynomial
-        pos_poly_to_lagrange_mult_map = {}
-        for (plane_constraint_polynomials_A, plane_constraint_polynomials_B) in collision_pair_to_positive_constraint_map.values():
-            poly_list = plane_constraint_polynomials_A.tolist() + plane_constraint_polynomials_B.tolist()
-            for p in poly_list:
-                pos_poly_to_lagrange_mult_map[p] = self.initialize_N_lagrange_multipliers_by_poly(p, max_faces)
-        self.region_to_prog_map = region_to_prog_map
-        self.collision_pair_to_plane_map = collision_pair_to_plane_map
-        self.collision_pair_to_positive_constraint_map = collision_pair_to_positive_constraint_map
-        self.pos_poly_to_lagrange_mult_map = pos_poly_to_lagrange_mult_map
-        return region_to_prog_map, collision_pair_to_plane_map, collision_pair_to_positive_constraint_map, pos_poly_to_lagrange_mult_map
+            # initialize the lagrange multipliers by polynomial
+            with _log_time_usage("time to pre-allocate multipliers map: "):
+                pos_poly_to_lagrange_mult_map = {}
+                for (plane_constraint_polynomials_A, plane_constraint_polynomials_B) in collision_pair_to_positive_constraint_map.values():
+                    poly_list = plane_constraint_polynomials_A.tolist() + plane_constraint_polynomials_B.tolist()
+                    for p in poly_list:
+                        pos_poly_to_lagrange_mult_map[p] = self.initialize_N_lagrange_multipliers_by_poly(p, max_faces)
+                self.region_to_prog_map = region_to_prog_map
+                self.collision_pair_to_plane_map = collision_pair_to_plane_map
+                self.collision_pair_to_positive_constraint_map = collision_pair_to_positive_constraint_map
+                self.pos_poly_to_lagrange_mult_map = pos_poly_to_lagrange_mult_map
+            return region_to_prog_map, collision_pair_to_plane_map, collision_pair_to_positive_constraint_map, pos_poly_to_lagrange_mult_map
 
 
     def add_positive_on_region_contraint_to_prog(self, prog, region, pos_poly_to_lagrange_mult_map, strict_pos_tol = 1e-5):
