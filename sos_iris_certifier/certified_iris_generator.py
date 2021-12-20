@@ -207,99 +207,57 @@ class CertifiedIrisRegionGenerator():
             print(f"Region {i+1}/{len(region_to_prog_map.keys())}. Problem built in {t1-t0}secs")
         return region_to_prog_map
 
-    def _initalize_certifier(self, plane_order = -1, penalize_coeffs = True):
+    def _initalize_certifier(self, plane_order = -1, strict_pos_tol = 1e-5, penalize_coeffs = True):
         if self.regions is None:
             raise ValueError("generate iris regions before attempting certification")
+        self.certification_problems = dict.fromkeys(self.regions)
         for region in self.regions:
-            prog, collision_pair_to_plane_map, collision_pair_to_positive_constraint_map, pos_poly_to_lagrange_mult_map = \
-                self._initialize_certifier_for_region(region, plane_order = plane_order, penalize_coeffs = penalize_coeffs)
+            self.certification_problems[region] = self._initialize_certifier_for_region(region, plane_order,
+                                                                                        strict_pos_tol, penalize_coeffs)
+            print()
+        return self.certification_problems
 
-    def _initialize_certifier_for_region(self, region, plane_order = -1, penalize_coeffs = True):
+    def _initialize_certifier_for_region(self, region, plane_order = -1,
+                                         strict_pos_tol = 1e-5, penalize_coeffs = True):
         with _log_time_usage("Time to initialize region program"):
             num_faces = region.A().shape[0]
 
             certify_for_fixed_eps_prog = MathematicalProgram()
             certify_for_fixed_multiplier_prog = MathematicalProgram()
 
-            certify_for_fixed_eps_prog.AddIndeterminates(self.forward_kin.t())
-            certify_for_fixed_multiplier_prog.AddIndeterminates(self.forward_kin.t())
-
-            var_eps_for_fixed_eps_prog = certify_for_fixed_eps_prog.NewContinuousVariables(num_faces, 1, "eps")
-            var_eps_for_fixed_multiplier_prog = certify_for_fixed_multiplier_prog.NewContinuousVariables(num_faces, 1, "eps")
-            # add quadratic cost for variable eps program
-            var_eps_for_fixed_multiplier_prog.AddQuadraticCost(var_eps_for_fixed_multiplier_prog.T@var_eps_for_fixed_multiplier_prog, is_convex = True)
-
             with _log_time_usage("time to create maps: "):
                 # maps a collision pair to a plane (a(t), b(t)) that will certify its collision freeness
                 collision_pair_to_plane_variable_map = dict.fromkeys(self.pairs)
+                collision_pair_to_plane_poly_map = dict.fromkeys(self.pairs)
 
                 # maps a geom id and vertex number to a polynomial which must be positive to be certified and a set of multipliers
                 geom_id_and_vert_to_pos_poly_and_multiplier_variable_map = {}
 
                 for geomA, geomB in self.pairs:
                     (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) = \
-                        self.initialize_separating_hyperplanes_polynomials(geomA, geomB, plane_order=-plane_order)
-                    collision_pair_to_plane_variable_map[(geomA, geomB)] = (a_poly, b_poly)
+                        self.initialize_separating_hyperplanes_polynomials(geomA, geomB, plane_order=plane_order)
+                    collision_pair_to_plane_variable_map[(geomA, geomB)] = (a_vars, b_vars)
+                    collision_pair_to_plane_poly_map[(geomA, geomB)] = (a_poly, b_poly)
                     for i, p in enumerate(plane_constraint_polynomials_A):
                         multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
                         geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomA, i)] = (p, multipliers_map)
-
+                    for i, p in enumerate(plane_constraint_polynomials_B):
+                        multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
+                        geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomB, i)] = (p, multipliers_map)
                     # add the plane as a decision variable to the program
-                    self.add_plane_to_prog(certify_for_fixed_eps_prog, a_vars, b_vars, penalize_coeffs=penalize_coeffs)
-                    self.add_plane_to_prog(var_eps_for_fixed_multiplier_prog, a_vars, b_vars, penalize_coeffs=False)
+                    # self.add_plane_to_prog(certify_for_fixed_eps_prog, a_vars, b_vars, penalize_coeffs=penalize_coeffs)
+                    # self.add_plane_to_prog(certify_for_fixed_multiplier_prog, a_vars, b_vars, penalize_coeffs=False)
 
         #TODO construct problems
+        with _log_time_usage("time to create Region Certification Problem: "):
+            certification_problem = RegionCertificationProblem(
+                region, certify_for_fixed_eps_prog, certify_for_fixed_multiplier_prog,
+                collision_pair_to_plane_variable_map, collision_pair_to_plane_poly_map,
+                geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
+                self.forward_kin.t(), self.mosek, strict_pos_tol, penalize_coeffs
+            )
 
-        return certify_for_fixed_eps_prog, collision_pair_to_plane_map, collision_pair_to_positive_constraint_map, pos_poly_to_lagrange_mult_map
-
-
-    def _initialize_certifier2(self, plane_order = -1, penalize_coeffs = True):
-        """
-        create all the planes and polynomial conditions to certify safe regions. also pre-initializes the lagrange multipliers
-        Precondition: iris regions must have been generated once.
-        :param plane_order: order of polynomial hyperplane
-        :param penalize_coeffs: whether to add penalty on plane weights
-        :return:
-        """
-        with _log_time_usage("Total time to intialize: "):
-            if self.regions is None:
-                raise ValueError("generate iris regions before attempting certification")
-
-            # create one program for each region
-            with _log_time_usage("time to create region to program map: "):
-                region_to_prog_map = dict.fromkeys(self.regions)
-                max_faces = 0
-                for r in region_to_prog_map:
-                    prog = MathematicalProgram()
-                    prog.AddIndeterminates(self.forward_kin.t())
-                    region_to_prog_map[r] = prog
-                    max_faces = np.max([max_faces, r.b().shape[0]])
-
-            # initialize hyperplane per collision pair
-            with _log_time_usage("time to create collision pair to plane map: "):
-                collision_pair_to_plane_map = dict.fromkeys(self.pairs)
-                collision_pair_to_positive_constraint_map = dict.fromkeys(self.pairs)
-                for pair in self.pairs:
-                    (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) =\
-                        self.initialize_separating_hyperplanes_polynomials(*pair, plane_order=-plane_order)
-                    collision_pair_to_plane_map[pair] = (a_poly, b_poly)
-                    collision_pair_to_positive_constraint_map[pair] = (plane_constraint_polynomials_A, plane_constraint_polynomials_B)
-                    # add the plane as a decision variable to the program
-                    for r in region_to_prog_map:
-                        self.add_plane_to_prog(region_to_prog_map[r], a_vars, b_vars, penalize_coeffs = penalize_coeffs)
-
-            # initialize the lagrange multipliers by polynomial
-            with _log_time_usage("time to pre-allocate multipliers map: "):
-                pos_poly_to_lagrange_mult_map = {}
-                for (plane_constraint_polynomials_A, plane_constraint_polynomials_B) in collision_pair_to_positive_constraint_map.values():
-                    poly_list = plane_constraint_polynomials_A.tolist() + plane_constraint_polynomials_B.tolist()
-                    for p in poly_list:
-                        pos_poly_to_lagrange_mult_map[p] = self.initialize_N_lagrange_multipliers_by_poly(p, max_faces)
-                self.region_to_prog_map = region_to_prog_map
-                self.collision_pair_to_plane_map = collision_pair_to_plane_map
-                self.collision_pair_to_positive_constraint_map = collision_pair_to_positive_constraint_map
-                self.pos_poly_to_lagrange_mult_map = pos_poly_to_lagrange_mult_map
-            return region_to_prog_map, collision_pair_to_plane_map, collision_pair_to_positive_constraint_map, pos_poly_to_lagrange_mult_map
+        return certification_problem
 
 
     #TODO modify this
@@ -473,7 +431,7 @@ class CertifiedIrisRegionGenerator():
         for i in range(vertex_pos.shape[1]):
             if leq_or_geq == 'leq':
                 # a^Tx + b <= -1 -> -(a^Tx+b+1)>=0
-                plane_polys_per_vertex[i] = -a_poly.dot(nums[:, i]) - (b_poly + 1) * (col_den[i])
+                plane_polys_per_vertex[i] = -(a_poly.dot(nums[:, i]) + (b_poly + 1) * (col_den[i]))
 
             elif leq_or_geq == 'geq':
                 # a^Tx+b >= 1 -> a^Tx+b -1 >= 0
@@ -485,7 +443,8 @@ class CertifiedIrisRegionGenerator():
         return plane_polys_per_vertex
 
     def initialize_separating_hyperplanes_polynomials(self, geomA, geomB, plane_order = -1):
-        VPolyA, VPolyB = self.vpoly_sets_in_self_frame_by_geom_id[geomA], self.vpoly_sets_in_self_frame_by_geom_id[geomB]
+        VPolyA = self.vpoly_sets_in_self_frame_by_geom_id[geomA]
+        VPolyB = self.vpoly_sets_in_self_frame_by_geom_id[geomB]
 
         R_WA, p_WA = self.X_WA_multilinear_list[int(self.body_indexes_by_geom_id[geomA])]
         R_WB, p_WB = self.X_WA_multilinear_list[int(self.body_indexes_by_geom_id[geomB])]
@@ -497,9 +456,9 @@ class CertifiedIrisRegionGenerator():
             basis = GenerateMonomialBasisOrderAllUpToOneExceptOneUpToTwo(self.t_variables)
             a_poly, b_poly, a_vars, b_vars = self.construct_separating_hyperplane_by_basis(basis)
         plane_constraint_polynomials_A = self.makeBodyHyperplaneSidePolynomial(a_poly, b_poly,
-                                          VPolyA, R_WA, p_WA, 'leq')
+                                                                               VPolyA, R_WA, p_WA, 'leq')
         plane_constraint_polynomials_B = self.makeBodyHyperplaneSidePolynomial(a_poly, b_poly,
-                                                                               VPolyB, R_WB, p_WB, 'leq')
+                                                                               VPolyB, R_WB, p_WB, 'geq')
         return (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B)
 
     def initialize_N_lagrange_multipliers_by_basis(self, basis, num_multipliers, s_min1_basis = None):
@@ -589,13 +548,47 @@ class RegionCertificationProblem:
     #     'cur_eps_value': 0
     # }
 
-    def __init__(self, region, certify_for_fixed_eps_prog, certify_for_fixed_multiplier_prog,
-                 collision_pair_to_plane_variable_map, geom_id_and_vert_to_pos_poly_and_multiplier_variable_map):
+    def __init__(self, region, certify_for_fixed_eps_prog,
+                 certify_for_fixed_multiplier_prog,
+                 collision_pair_to_plane_variable_map,
+                 collision_pair_to_plane_poly_map,
+                 geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
+                 t_array,
+                 solver,
+                 strict_pos_tol = 1e-5,
+                 penalize_plane_coeffs = True):
+
         self.certify_for_fixed_eps_prog = certify_for_fixed_eps_prog
         self.certify_for_fixed_multiplier_prog = certify_for_fixed_multiplier_prog
+        self.t_array = t_array
+        self.t_variables = sym.Variables(t_array)
+
+        self.certify_for_fixed_eps_prog.AddIndeterminates(self.t_array)
+        self.certify_for_fixed_multiplier_prog.AddIndeterminates(self.t_array)
+
         self.collision_pair_to_plane_variable_map = collision_pair_to_plane_variable_map
+        self.collision_pair_to_plane_poly_map = collision_pair_to_plane_poly_map
+        self.collision_pair_to_plane_result_map = dict.fromkeys(self.collision_pair_to_plane_poly_map.keys())
+
         self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map = geom_id_and_vert_to_pos_poly_and_multiplier_variable_map
+        self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map = dict.fromkeys(geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys())
+
+        self.penalize_plane_coeffs = penalize_plane_coeffs
+
         self.region = region
+        self.strict_pos_tol = strict_pos_tol
+        self.num_faces = region.b().shape[0]
+
+        self.cur_eps = np.zeros(self.num_faces)
+        self.fixed_epsilon_result = None
+        self.fixed_multiplier_result = None
+
+        self.var_eps = self.certify_for_fixed_multiplier_prog.NewContinuousVariables(self.num_faces, 'eps')
+
+        self._prepare_fixed_epsilon_problem()
+        self._prepare_fixed_multiplier_problem()
+
+        self.solver = solver
 
     @property
     def cur_eps(self):
@@ -604,77 +597,209 @@ class RegionCertificationProblem:
     @cur_eps.setter
     def cur_eps(self, val):
         self._cur_eps = val
-        #todo change value of equality constraint of this program
 
-    def __init__2(self, region, prog, collision_pair_to_plane_variable_map, collision_pair_to_positive_constraint_map,
-                 pos_poly_to_lagrange_mult_variable_map):
-        self.pos_poly_to_lagrange_mult_variable_map = pos_poly_to_lagrange_mult_variable_map
-        self.collision_pair_to_positive_constraint_map = collision_pair_to_positive_constraint_map
-        self.collision_pair_to_plane_variable_map = collision_pair_to_plane_variable_map
-        self.prog = prog
-        self.region = region
-        self.modified_region = region
-
-        self.var_epsilon = self.prog.NewContinuousVariables(region.A().shape[0])
-
-        self.result = None
-        self.pos_poly_to_lagrange_mult_variable_map = dict.fromkeys(pos_poly_to_lagrange_mult_variable_map.keys())
-        self.collision_pair_to_positive_constraint_map = dict.fromkeys(collision_pair_to_positive_constraint_map.keys())
-        self.collision_pair_to_plane_result_map = dict.fromkeys(collision_pair_to_plane_variable_map.keys())
-
-    @property
-    def is_solved(self):
-        return self.result is None
-
-    def certify_for_epsilon(self, solver, region):
-        self.build_problem_for_region(region)
-        self.result = solver.Solve(self.prog)
-
-        self._extract_planes()
-        self._extract_multipliers()
-
-    def build_problem_for_region(self, region):
-        pass
-
-    def _extract_planes(self):
-        for k, (a, b) in self.collision_pair_to_plane_variable_map.items():
+    def _extract_planes(self, result):
+        for k, (a, b) in self.collision_pair_to_plane_poly_map.items():
             a_list = []
             for ai in a:
-                a_list.append(self.result.GetSolution(ai))
-            self.collision_pair_to_plane_result_map [k] = (np.array(a_list), self.result.GetSolution(b))
+                a_list.append(result.GetSolution(ai))
+            self.collision_pair_to_plane_result_map[k] = (np.array(a_list), result.GetSolution(b))
 
-    def _extract_multipliers(self):
-        for k, multiplier_dict in self.pos_poly_to_lagrange_mult_variable_map.items():
-            self.collision_pair_to_plane_result_map[k] = dict.fromkeys(multiplier_dict.keys())
-            for i, multiplier in multiplier_dict:
-                self.collision_pair_to_plane_result_map[k][i] = self.result.GetSolution(multiplier)
+    def _extract_multipliers(self, result):
+        for k, pos_poly_multiplier_dict in self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.items():
+            multiplier_dict = pos_poly_multiplier_dict[1]
+            multiplier_result_dict = multiplier_dict.fromkeys(multiplier_dict.keys())
+            pos_poly_result = result.GetSolution(pos_poly_multiplier_dict[0])
+            for i, multiplier in multiplier_dict.items():
+                multiplier_result_dict[i] = result.GetSolution(multiplier[0]), result.GetSolution(multiplier[1]),
 
-    def _construct_poly_positive_on_region_constraint(self, polynomial_to_assert_positive, multiplier_map, strict_pos_tol = 1e-5):
+            self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map[k] = (pos_poly_result, multiplier_result_dict)
+
+    def attempt_certification_for_epsilon(self, epsilon):
         """
-        Putinar's psatz asserts that a polynomial is strictly positive on an Archimedean polytope if and only if it can
-        be expressed as p(t) = s_(-1)(t) + \sum_{i=0}^(n-1) s_i(t)(d_i - c^T_i t) where s are SOS
-        :param prog:
-        :param polynomial_to_assert_positive:
-        :param polytope:
-        :param strict_pos_tol: tolerance for p(t) >= strict_pos_tol > 0
-        :return: the modified program and a dictionary mapping constraint number to multiplier
+        builds the certification problem for a fixed epsilon.
+        If the problem solves: return True, collision_pair -> plane, (geomId, vert_number) -> multiplier_dict
+        else: return False, None, None
+        :param epsilon:
+        :return:
         """
-        assert strict_pos_tol > 0
+        self.build_problem_for_epsilon(epsilon)
+        self.fixed_epsilon_result = self.solver.Solve(self.certify_for_fixed_eps_prog)
+        if self.fixed_epsilon_result.is_success():
+            self._extract_planes(self.fixed_epsilon_result)
+            self._extract_multipliers(self.fixed_epsilon_result)
+            return self.fixed_epsilon_result.is_success(),\
+                   self.collision_pair_to_plane_result_map,\
+                   self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map
+        return False, None, None
 
+    def build_problem_for_epsilon(self, epsilon):
+        """
+        Precondition: _prepare_fixed_epsilon_problem must be called before.
+        Completes the construction of the rhs of p(t) = s_(-1)(t) + \sum_{i=0}^(n-1) s_i(t)(d_i - eps - c^T_i t).
+        Removes any existing equality constraints of the above form and replaces it with the newly constructed equality
+        above.
+        :param epsilon:
+        """
+        if len(epsilon.shape) != 1:
+            raise ValueError(f"epsilon wrong shape. Must be 1D, is {len(epsilon.shape)}D")
+        if epsilon.shape[0] != self.num_faces:
+            raise ValueError(f"epsilon wrong shape expected {self.num_faces} for {epsilon.shape[0]}" )
+
+        self.geom_id_and_vert_to_pos_poly_and_putinar_equality = dict.fromkeys(self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone.keys())
+        for geom_id_and_vert, poly_and_putinar_preallocated in self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone.items():
+            if self.geom_id_and_vert_to_positive_poly_eq_constraints[geom_id_and_vert] is not None:
+                for constraint in self.geom_id_and_vert_to_positive_poly_eq_constraints[geom_id_and_vert]:
+                    self.certify_for_fixed_eps_prog.RemoveConstraint(constraint
+                        )
+            poly, putinar_cone_poly = poly_and_putinar_preallocated[0], poly_and_putinar_preallocated[1]
+            multiplier_map = self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[geom_id_and_vert][1]
+            # check that this isn't going to change the value of putinar preallocated
+            for i in range(epsilon.shape[0]):
+                if np.abs(epsilon[i]) > 1e-5:
+                    putinar_cone_poly += -epsilon[i]*multiplier_map[i][0]
+            putinar_cone_poly.SetIndeterminates(self.t_variables)
+
+            self.geom_id_and_vert_to_positive_poly_eq_constraints[geom_id_and_vert] =\
+                self.ManualAddEqualityConstraintsBetweenPolynomials(self.certify_for_fixed_eps_prog,
+                                                                    putinar_cone_poly,
+                                                                    poly - self.strict_pos_tol)
+            self.geom_id_and_vert_to_pos_poly_and_putinar_equality[geom_id_and_vert] = (poly - self.strict_pos_tol, putinar_cone_poly)
+
+    def _prepare_fixed_epsilon_problem(self):
+        """
+        Putinar's psatz asserts that a polynomial is strictly positive on an Archimedean polytope Ct <= d-eps if and
+        only if it can be expressed as p(t) = s_(-1)(t) + \sum_{i=0}^(n-1) s_i(t)(d_i - eps - c^T_i t) where s are SOS.
+        This method creates the term on the right hand side of the equation with eps = 0 and adds all the multipliers
+        to the program certify_for_fixed_eps_prog. It does NOT add the equality constraint as this will be added when
+        a eps is provided later.
+
+        This method also adds the plane variables to the program certify_for_fixed_eps_prog
+
+        In this method we construct:
+        self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone with pairs:
+         (geom_id, vertex number) -> (lhs, rhs (with eps = 0))
+         self.geom_id_and_vert_to_positive_poly_eq_constraint with pairs:
+         (geom_id, vertex number) -> None
+         the latter will hold the constraints of the program so we can remove them later and re-use in the future
+        """
+        # add plane variables to problem
+        for (a_coeff, b_coeff) in self.collision_pair_to_plane_variable_map.values():
+            self._add_plane_to_prog(self.certify_for_fixed_eps_prog, a_coeff, b_coeff,
+                                    penalize_coeffs=self.penalize_plane_coeffs)
+
+        # create putinar cone
         C = self.region.A()
         d = self.region.b()
+        self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone = \
+            dict.fromkeys(self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys())
+        self.geom_id_and_vert_to_positive_poly_eq_constraints = \
+            dict.fromkeys(self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys())
 
-        l, Q = multiplier_map[-1]
-        self.prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
-        self.prog.AddSosConstraint(l)
+        for geom_id_and_vert, poly_and_mult in self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.items():
+            (poly, multiplier_map) = poly_and_mult[0], poly_and_mult[1]
+            l, Q = multiplier_map[-1]
+            self.certify_for_fixed_eps_prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
+            self.certify_for_fixed_eps_prog.AddSosConstraint(l)
 
-        putinar_cone_poly = l
-        # build putinar cone poly
-        for i in range(C.shape[0]):
-            l, Q = multiplier_map[i]
-            self.prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
-            self.prog.AddSosConstraint(l)
-            putinar_cone_poly += l * sym.Polynomial(d[i] - C[i, :] @ self.forward_kin.t())
-        putinar_cone_poly.SetIndeterminates(self.t_variables)
-        self.prog.AddEqualityConstraintBetweenPolynomials(putinar_cone_poly, polynomial_to_assert_positive - strict_pos_tol)
+            putinar_cone_poly = l
+            # build putinar cone poly
+            for i in range(C.shape[0]):
+                l, Q = multiplier_map[i]
+                self.certify_for_fixed_eps_prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
+                self.certify_for_fixed_eps_prog.AddSosConstraint(l)
+                putinar_cone_poly += l * sym.Polynomial(d[i] - C[i, :] @ self.t_array)
+            putinar_cone_poly.SetIndeterminates(self.t_variables)
+            self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone[geom_id_and_vert] = \
+                (poly, putinar_cone_poly)
+
+            # self.geom_id_and_vert_to_positive_poly_eq_constraint[geom_id_and_vert] = \
+
+    def attempt_reduce_eps_in_certificate(self, geom_id_and_vert_to_pos_poly_and_multiplier_map):
+        """
+        for a fixed set of multipliers, try to reduce epsilon as much as possible. This program should always be feasible
+        if the multipliers constitute a valid certificate
+        :param geom_id_and_vert_to_pos_poly_and_multiplier_map: (geom_id, vertex_number) ->
+        (polynomial defined by plane, multiplier certifying positivity)
+        :return: True, (collision_pair) -> (a(t), b(t)), certified_region, pos_poly_to_multiplier_map certificate
+        """
+        self.build_fixed_multiplier_problem(geom_id_and_vert_to_pos_poly_and_multiplier_map)
+        self.fixed_multiplier_result = self.solver.Solve(self.certify_for_fixed_multiplier_prog)
+        if self.fixed_multiplier_result.is_success():
+            self._extract_planes(self.fixed_multiplier_result)
+            new_region = self._extract_new_region(self.fixed_multiplier_result)
+            return self.fixed_epsilon_result.is_success(), \
+                   self.collision_pair_to_plane_result_map, \
+                   new_region, \
+                   geom_id_and_vert_to_pos_poly_and_multiplier_map
+        raise ValueError("program was infeasible. Are the multipliers valid?")
+        return False, None, None
+
+    def build_fixed_multiplier_problem(self, geom_id_and_vert_to_pos_poly_and_multiplier_map):
+        """
+        Precondition: call _prepare_fixed_multiplier_problem first
+        :return:
+        """
+        C = self.region.A()
+        d = self.region.b()
+        for geom_id_and_vert, pos_poly_and_multiplier_map in geom_id_and_vert_to_pos_poly_and_multiplier_map.items():
+            if self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] is not None:
+                self.certify_for_fixed_multiplier_prog.RemoveConstraint(
+                    self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert])
+            pos_poly, multiplier_map = pos_poly_and_multiplier_map[0], pos_poly_and_multiplier_map[1]
+            rhs = multiplier_map[-1]
+            for i in range(self.var_eps.shape[0]):
+                e = self.var_eps[i]
+                rhs += multiplier_map[i]*sym.Polynomial(d[i]-e-C[i,:]@self.t_array)
+            self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] = \
+                self.ManualAddEqualityConstraintsBetweenPolynomials(self.certify_for_fixed_multiplier_prog,
+                                                                    pos_poly, rhs)
+
+    def _prepare_fixed_multiplier_problem(self):
+        """
+        add plane coeffs as variables in program certify_for_fixed_multipliers. Adds quadratic cost on epsilon to program.
+        creates empty dictionary of (geomId, vertexNumber) -> constraint_for_fixed_multiplier
+        :return:
+        """
+        # add plane variables to problem
+        for (a_coeff, b_coeff) in self.collision_pair_to_plane_variable_map.values():
+            self._add_plane_to_prog(self.certify_for_fixed_multiplier_prog, a_coeff, b_coeff,
+                                    penalize_coeffs=False)
+        self.certify_for_fixed_multiplier_prog.AddQuadraticCost(self.var_eps.dot(self.var_eps))
+        self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier = dict.fromkeys(
+            self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys()
+        )
+        # var_eps must be positive
+        self.certify_for_fixed_multiplier_prog.AddBoundingBoxConstraint(np.zeros(self.num_faces), np.inf*np.ones(self.num_faces),
+                                                                        self.var_eps)
+
+
+    def _add_plane_to_prog(self, prog, a_coeffs, b_coeffs, penalize_coeffs=True):
+        prog.AddDecisionVariables(a_coeffs)
+        prog.AddDecisionVariables(b_coeffs)
+
+        if penalize_coeffs:
+            ntmp = a_coeffs.shape[0] + b_coeffs.shape[0]
+            Qtmp, btmp = np.eye(ntmp), np.zeros(ntmp)
+            prog.AddQuadraticCost(Qtmp, btmp, np.concatenate([a_coeffs, b_coeffs]), is_convex=True)
+
         return prog
+
+    def ManualAddEqualityConstraintsBetweenPolynomials(self, prog, p1, p2):
+        """
+        adds the equality constraint between polynomials and returns list of all the equality constraints imposed
+        :param prog: prog to add constraint
+        :param p1: polynomial 1
+        :param p2: polynomial 2
+        :return: list of linear equality constraint bindings
+        """
+        diff = p1-p2
+        constraint_list = []
+        for mono, coeff in diff.monomial_to_coefficient_map().items():
+            linear_constraint_binding = prog.AddLinearEqualityConstraint(coeff, 0)
+            constraint_list.append(linear_constraint_binding)
+        return constraint_list
+
+    def _extract_new_region(self, result):
+        self.cur_eps = result.GetSolution(self.var_eps)
+        return HPolyhedron(self.region.A(), self.region.b()-self.var_eps)
