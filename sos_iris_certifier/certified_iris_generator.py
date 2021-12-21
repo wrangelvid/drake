@@ -187,27 +187,8 @@ class CertifiedIrisRegionGenerator():
     #endregion
 
     # region certification
-    def _build_certification_problems_from_maps(self, region_to_prog_map, pos_poly_to_lagrange_mult_map,
-                                               strict_pos_tol = 1e-5):
-        """
-        build the certification problem for each region. This step can be parallelized in theory
-        but cannot pickle drake objects.
-        :param region_to_prog_map:
-        :param pos_poly_to_lagrange_mult_map:
-        :param strict_pos_tol:
-        :return:
-        """
-        for i, (region, prog) in enumerate(region_to_prog_map.items()):
-            t0 = time.time()
-            prog = self.add_positive_on_region_contraint_to_prog(prog, region,
-                                                            pos_poly_to_lagrange_mult_map,
-                                                            strict_pos_tol = strict_pos_tol)
-            region_to_prog_map[region] = prog
-            t1 = time.time()
-            print(f"Region {i+1}/{len(region_to_prog_map.keys())}. Problem built in {t1-t0}secs")
-        return region_to_prog_map
-
-    def _initalize_certifier(self, plane_order = -1, strict_pos_tol = 1e-5, penalize_coeffs = True):
+    # region certification intialization
+    def initalize_certifier(self, plane_order = -1, strict_pos_tol = 1e-5, penalize_coeffs = True):
         if self.regions is None:
             raise ValueError("generate iris regions before attempting certification")
         self.certification_problems = dict.fromkeys(self.regions)
@@ -235,7 +216,7 @@ class CertifiedIrisRegionGenerator():
 
                 for geomA, geomB in self.pairs:
                     (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) = \
-                        self.initialize_separating_hyperplanes_polynomials(geomA, geomB, plane_order=plane_order)
+                        self.initialize_separating_hyperplanes_polynomials(geomA, geomB, strict_pos_tol = strict_pos_tol, plane_order=plane_order)
                     collision_pair_to_plane_variable_map[(geomA, geomB)] = (a_vars, b_vars)
                     collision_pair_to_plane_poly_map[(geomA, geomB)] = (a_poly, b_poly)
                     for i, p in enumerate(plane_constraint_polynomials_A):
@@ -244,108 +225,17 @@ class CertifiedIrisRegionGenerator():
                     for i, p in enumerate(plane_constraint_polynomials_B):
                         multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
                         geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomB, i)] = (p, multipliers_map)
-                    # add the plane as a decision variable to the program
-                    # self.add_plane_to_prog(certify_for_fixed_eps_prog, a_vars, b_vars, penalize_coeffs=penalize_coeffs)
-                    # self.add_plane_to_prog(certify_for_fixed_multiplier_prog, a_vars, b_vars, penalize_coeffs=False)
 
-        #TODO construct problems
         with _log_time_usage("time to create Region Certification Problem: "):
             certification_problem = RegionCertificationProblem(
                 region, certify_for_fixed_eps_prog, certify_for_fixed_multiplier_prog,
                 collision_pair_to_plane_variable_map, collision_pair_to_plane_poly_map,
                 geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
-                self.forward_kin.t(), self.mosek, strict_pos_tol, penalize_coeffs
+                self.forward_kin.t(), self.mosek, penalize_coeffs
             )
 
         return certification_problem
 
-
-    #TODO modify this
-    def add_positive_on_region_contraint_to_prog(self, prog, region, pos_poly_to_lagrange_mult_map, strict_pos_tol = 1e-5):
-        """
-        add the constraint that the polynomials that are the keys in pos_poly_to_lagrange_mult_map are positive
-        in the polytopic region
-        :param prog: prog to add constraint
-        :param region: region positivity is required
-        :param pos_poly_to_lagrange_mult_map: dictionary {polynomial -> pre-initialized lagrange multipliers}
-        :param strict_pos_tol: p(t) >= strict_pos_tol > 0
-        :return:
-        """
-        t0 = time.time()
-        for i, (poly, mults) in enumerate(pos_poly_to_lagrange_mult_map.items()):
-            prog = self.add_poly_positive_on_polytope_constraint_with_map_to_prog(prog, poly,
-                                                                      region, mults, strict_pos_tol=strict_pos_tol)
-        t1 = time.time()
-        print(f"Region added in {t1-t0} seconds")
-        return prog
-
-
-    def add_poly_positive_on_polytope_constraint_with_map_to_prog(self, prog, polytope, polynomial_to_assert_positive,
-                                                           multiplier_map, strict_pos_tol = 1e-5):
-        """
-        Putinar's psatz asserts that a polynomial is strictly positive on an Archimedean polytope if and only if it can
-        be expressed as p(t) = s_(-1)(t) + \sum_{i=0}^(n-1) s_i(t)(d_i - c^T_i t) where s are SOS
-        :param prog:
-        :param polynomial_to_assert_positive:
-        :param polytope:
-        :param strict_pos_tol: tolerance for p(t) >= strict_pos_tol > 0
-        :return: the modified program and a dictionary mapping constraint number to multiplier
-        """
-        assert strict_pos_tol > 0
-
-        C = polytope.A()
-        d = polytope.b()
-
-        l, Q = multiplier_map[-1]
-        prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
-        prog.AddSosConstraint(l)
-
-        putinar_cone_poly = l
-        # build putinar cone poly
-        for i in range(C.shape[0]):
-            l, Q = multiplier_map[i]
-            prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
-            prog.AddSosConstraint(l)
-            putinar_cone_poly += l * sym.Polynomial(d[i] - C[i, :] @ self.forward_kin.t())
-        putinar_cone_poly.SetIndeterminates(self.t_variables)
-        prog.AddEqualityConstraintBetweenPolynomials(putinar_cone_poly, polynomial_to_assert_positive - strict_pos_tol)
-        return prog
-    #
-    # def add_poly_positive_on_polytope_constraint_by_basis(self, prog, polynomial_to_assert_positive,
-    #                                                       polytope, strict_pos_tol = 1e-5):
-    #     """
-    #     Putinar's psatz asserts that a polynomial is strictly positive on an Archimedean polytope if and only if it can
-    #     be expressed as p(t) = s_(-1)(t) + \sum_{i=0}^(n-1) s_i(t)(d_i - c^T_i t) where s are SOS
-    #     :param prog:
-    #     :param polynomial_to_assert_positive:
-    #     :param polytope:
-    #     :param strict_pos_tol: tolerance for p(t) >= strict_pos_tol > 0
-    #     :return: the modified program and a dictionary mapping constraint number to multiplier
-    #     """
-    #     assert strict_pos_tol > 0
-    #     s_min1_basis = iris_utils.sparsest_sos_basis_poly(polynomial_to_assert_positive)
-    #     # TODO reduce this basis by degree 1
-    #     si_basis = iris_utils.sparsest_sos_basis_poly(polynomial_to_assert_positive)
-    #     C = polytope.A()
-    #     d = polytope.b()
-    #     multiplier_map = dict.fromkeys([-1] + [i for i in range(C.shape[0])])
-    #
-    #     l, Q = prog.NewSosPolynomial(s_min1_basis)
-    #     l.SetIndeterminates(self.t_variables)
-    #     multiplier_map[-1] = l
-    #     prog.AddSosConstraint(l)
-    #
-    #     putinar_cone_poly = l
-    #     # build putinar cone poly
-    #     for i in range(C.shape[0]):
-    #         l, Q = prog.NewSosPolynomial(si_basis)
-    #         l.SetIndeterminates(self.t_variables)
-    #         multiplier_map[i] = l
-    #         prog.AddSosConstraint(l)
-    #         putinar_cone_poly += l*(d[i]-C[i,:]@self.t_variables)
-    #     putinar_cone_poly.SetIndeterminates(self.t_variables)
-    #     prog.AddEqualityConstraintBetweenPolynomials(putinar_cone_poly, polynomial_to_assert_positive - strict_pos_tol)
-    #     return prog, multiplier_map
 
     def construct_separating_hyperplane_by_basis(self, basis, plane_name=''):
         """
@@ -382,7 +272,7 @@ class CertifiedIrisRegionGenerator():
         return self.construct_separating_hyperplane_by_basis(basis, plane_name=plane_name)
 
     def makeBodyHyperplaneSidePolynomial(self, a_poly, b_poly,
-                                          VPoly, R_WA, p_WA, leq_or_geq):
+                                          VPoly, R_WA, p_WA, leq_or_geq, strict_pos_tol = 1e-5):
         """
         create one polynomial per vertex in VPoly such that p_i(t) >= 0 implies that the vertex is on a given side of
         the plane
@@ -392,8 +282,10 @@ class CertifiedIrisRegionGenerator():
         :param R_WA: Forward kinematics rotation matrix as a multilinear polynomial in variables cos(q_i), sin(q_i)
         :param p_WA: Forward kinematics translation matrix as a multilinear polynomial in variables cos(q_i), sin(q_i)
         :param leq_or_geq: whether to use side a^Tx + b <= -1 or a^Tx + b >= 1
+        :param strict_pos_tol: numeric tolerance such that p_i(t) >= strict_pos_tol > 0
         :return: an array of polynomials whose positivity implies the given side of plane
         """
+        assert strict_pos_tol > 0
         num_verts = VPoly.vertices().shape[1]
 
         vertex_pos = R_WA @ (VPoly.vertices()) + np.repeat(p_WA[:, np.newaxis], num_verts, 1)
@@ -438,11 +330,23 @@ class CertifiedIrisRegionGenerator():
                 plane_polys_per_vertex[i] = a_poly.dot(nums[:, i]) + (b_poly - 1) * (col_den[i])
             else:
                 raise ValueError("leq_or_geq arg must be leq or geq not {}".format(leq_or_geq))
+            plane_polys_per_vertex[i] -= strict_pos_tol
             plane_polys_per_vertex[i].SetIndeterminates(self.t_variables)
 
         return plane_polys_per_vertex
 
-    def initialize_separating_hyperplanes_polynomials(self, geomA, geomB, plane_order = -1):
+    def initialize_separating_hyperplanes_polynomials(self, geomA, geomB, plane_order = -1, strict_pos_tol = 1e-5):
+        """
+        Given a pair of collision geometries initialize a separating hyperplane between the VPolytope of both
+        geometries
+        :param geomA: Geometry A
+        :param geomB: Geometry B
+        :param plane_order:  order of desired separating hyperplane polynomial
+        :param strict_pos_tol: tolerance for p(x) >= strict_pos_tol > 0
+        :return: (a_poly, b_poly) -> polynomials defining a^Tx+b = 0
+        (plane_constraint_polynomials_A, plane_constraint_polynomials_B) -> polynomials which must be positive to certify
+        that the hyperplane is separating
+        """
         VPolyA = self.vpoly_sets_in_self_frame_by_geom_id[geomA]
         VPolyB = self.vpoly_sets_in_self_frame_by_geom_id[geomB]
 
@@ -456,9 +360,11 @@ class CertifiedIrisRegionGenerator():
             basis = GenerateMonomialBasisOrderAllUpToOneExceptOneUpToTwo(self.t_variables)
             a_poly, b_poly, a_vars, b_vars = self.construct_separating_hyperplane_by_basis(basis)
         plane_constraint_polynomials_A = self.makeBodyHyperplaneSidePolynomial(a_poly, b_poly,
-                                                                               VPolyA, R_WA, p_WA, 'leq')
+                                                                               VPolyA, R_WA, p_WA, 'leq',
+                                                                               strict_pos_tol = strict_pos_tol)
         plane_constraint_polynomials_B = self.makeBodyHyperplaneSidePolynomial(a_poly, b_poly,
-                                                                               VPolyB, R_WB, p_WB, 'geq')
+                                                                               VPolyB, R_WB, p_WB, 'geq',
+                                                                               strict_pos_tol = strict_pos_tol)
         return (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B)
 
     def initialize_N_lagrange_multipliers_by_basis(self, basis, num_multipliers, s_min1_basis = None):
@@ -483,18 +389,7 @@ class CertifiedIrisRegionGenerator():
     def initialize_N_lagrange_multipliers_by_poly(self, poly, num_multipliers):
         basis = iris_utils.sparsest_sos_basis_poly(poly)
         return self.initialize_N_lagrange_multipliers_by_basis(basis, num_multipliers)
-
-    def add_plane_to_prog(self, prog, a_coeffs, b_coeffs, penalize_coeffs = True):
-        prog.AddDecisionVariables(a_coeffs)
-        prog.AddDecisionVariables(b_coeffs)
-
-        if penalize_coeffs:
-            ntmp = a_coeffs.shape[0] + b_coeffs.shape[0]
-            Qtmp, btmp = np.eye(ntmp), np.zeros(ntmp)
-            prog.AddQuadraticCost(Qtmp, btmp, np.concatenate([a_coeffs, b_coeffs]), is_convex=True)
-        return prog
-
-
+    #endregion
     #endregion
 
 
@@ -507,8 +402,7 @@ class CertifiedIrisRegionGenerator():
         self._iris_default_num_faces = kwargs.get('iris_default_num_face', self._iris_max_faces if self._iris_max_faces > 0 else 10)
 
     def _initialize_transform_logistics(self):
-        #TODO
-        #currently, we do everything in world pose. As hongkai points out this can make very high
+        #TODO: currently, we do everything in world pose. As hongkai points out this can make very high
         #degree polynomials. We should exploit his FindBodyInTheMiddleOfChain method
         self.link_poses_by_body_index_rat_pose = self.forward_kin.CalcLinkPoses(self.q_star,
                                                                       self.plant.world_body().index())
@@ -555,7 +449,6 @@ class RegionCertificationProblem:
                  geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
                  t_array,
                  solver,
-                 strict_pos_tol = 1e-5,
                  penalize_plane_coeffs = True):
 
         self.certify_for_fixed_eps_prog = certify_for_fixed_eps_prog
@@ -572,11 +465,11 @@ class RegionCertificationProblem:
 
         self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map = geom_id_and_vert_to_pos_poly_and_multiplier_variable_map
         self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map = dict.fromkeys(geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys())
+        self.geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map = dict.fromkeys(geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys())
 
         self.penalize_plane_coeffs = penalize_plane_coeffs
 
         self.region = region
-        self.strict_pos_tol = strict_pos_tol
         self.num_faces = region.b().shape[0]
 
         self.cur_eps = np.zeros(self.num_faces)
@@ -609,17 +502,19 @@ class RegionCertificationProblem:
         for k, pos_poly_multiplier_dict in self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.items():
             multiplier_dict = pos_poly_multiplier_dict[1]
             multiplier_result_dict = multiplier_dict.fromkeys(multiplier_dict.keys())
-            pos_poly_result = result.GetSolution(pos_poly_multiplier_dict[0])
+            pos_poly_variable = pos_poly_multiplier_dict[0]
+            pos_poly_result = result.GetSolution(pos_poly_variable)
             for i, multiplier in multiplier_dict.items():
                 multiplier_result_dict[i] = result.GetSolution(multiplier[0]), result.GetSolution(multiplier[1]),
 
             self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map[k] = (pos_poly_result, multiplier_result_dict)
+            self.geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map[k] = (pos_poly_variable, multiplier_result_dict)
 
     def attempt_certification_for_epsilon(self, epsilon):
         """
         builds the certification problem for a fixed epsilon.
         If the problem solves: return True, collision_pair -> plane, (geomId, vert_number) -> multiplier_dict
-        else: return False, None, None
+        else: return False, None, None, None
         :param epsilon:
         :return:
         """
@@ -630,8 +525,9 @@ class RegionCertificationProblem:
             self._extract_multipliers(self.fixed_epsilon_result)
             return self.fixed_epsilon_result.is_success(),\
                    self.collision_pair_to_plane_result_map,\
-                   self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map
-        return False, None, None
+                   self.geom_id_and_vert_to_pos_poly_and_multiplier_result_map,\
+                   self.geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map
+        return False, None, None, None
 
     def build_problem_for_epsilon(self, epsilon):
         """
@@ -663,8 +559,8 @@ class RegionCertificationProblem:
             self.geom_id_and_vert_to_positive_poly_eq_constraints[geom_id_and_vert] =\
                 self.ManualAddEqualityConstraintsBetweenPolynomials(self.certify_for_fixed_eps_prog,
                                                                     putinar_cone_poly,
-                                                                    poly - self.strict_pos_tol)
-            self.geom_id_and_vert_to_pos_poly_and_putinar_equality[geom_id_and_vert] = (poly - self.strict_pos_tol, putinar_cone_poly)
+                                                                    poly)
+            self.geom_id_and_vert_to_pos_poly_and_putinar_equality[geom_id_and_vert] = (poly, putinar_cone_poly)
 
     def _prepare_fixed_epsilon_problem(self):
         """
@@ -728,7 +624,7 @@ class RegionCertificationProblem:
         if self.fixed_multiplier_result.is_success():
             self._extract_planes(self.fixed_multiplier_result)
             new_region = self._extract_new_region(self.fixed_multiplier_result)
-            return self.fixed_epsilon_result.is_success(), \
+            return self.fixed_multiplier_result.is_success(), \
                    self.collision_pair_to_plane_result_map, \
                    new_region, \
                    geom_id_and_vert_to_pos_poly_and_multiplier_map
@@ -744,13 +640,17 @@ class RegionCertificationProblem:
         d = self.region.b()
         for geom_id_and_vert, pos_poly_and_multiplier_map in geom_id_and_vert_to_pos_poly_and_multiplier_map.items():
             if self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] is not None:
-                self.certify_for_fixed_multiplier_prog.RemoveConstraint(
-                    self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert])
+                for constraint in self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert]:
+                    self.certify_for_fixed_multiplier_prog.RemoveConstraint(constraint)
             pos_poly, multiplier_map = pos_poly_and_multiplier_map[0], pos_poly_and_multiplier_map[1]
-            rhs = multiplier_map[-1]
+            rhs = multiplier_map[-1][0]
             for i in range(self.var_eps.shape[0]):
                 e = self.var_eps[i]
-                rhs += multiplier_map[i]*sym.Polynomial(d[i]-e-C[i,:]@self.t_array)
+                ptmp = sym.Polynomial(d[i] - e - C[i, :] @ self.t_array)
+                # ensures that eps isn't considered an indeterminate
+                ptmp.SetIndeterminates(self.t_variables)
+                rhs += multiplier_map[i][0] * ptmp
+            rhs.SetIndeterminates(self.t_variables)
             self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] = \
                 self.ManualAddEqualityConstraintsBetweenPolynomials(self.certify_for_fixed_multiplier_prog,
                                                                     pos_poly, rhs)
@@ -802,4 +702,4 @@ class RegionCertificationProblem:
 
     def _extract_new_region(self, result):
         self.cur_eps = result.GetSolution(self.var_eps)
-        return HPolyhedron(self.region.A(), self.region.b()-self.var_eps)
+        return HPolyhedron(self.region.A(), self.region.b()-self.cur_eps)
