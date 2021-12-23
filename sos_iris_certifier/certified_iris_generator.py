@@ -50,8 +50,10 @@ class CertifiedIrisRegionGenerator():
         # Construct Rational Forward Kinematics
         self.forward_kin = RationalForwardKinematics(plant)
         self.t_variables = sym.Variables(self.forward_kin.t())
+
+        self.num_joints = self.plant.num_positions()
         # the point around which we construct the stereographic projection
-        self.q_star = kwargs.get('q_star', np.zeros(self.plant.num_positions()))
+        self.q_star = kwargs.get('q_star', np.zeros(self.num_joints))
         self.q_lower_limits = plant.GetPositionLowerLimits()
         self.t_lower_limits = self.forward_kin.ComputeTValue(self.q_lower_limits, self.q_star)
         self.q_upper_limits = plant.GetPositionUpperLimits()
@@ -69,17 +71,36 @@ class CertifiedIrisRegionGenerator():
         self._construct_collision_candidates()
 
         self.regions = None
+        self.seed_points = None
         self.ellipses = None
 
+        #construct certification problems
+        self.certification_problems = None
+
+        self.linesearch_regions = None
+        self.linesearch_regions_to_certificates_by_collision_pair_map = None
+
+        self.alternation_search_regions = None
+        self.alternation_search_regions_to_certificates_by_collision_pair_map = None
+
     #region IRIS
-    def iris_in_rational_space(self, seed_points, termination_threshold=2e-2, iteration_limit=100):
-        "pass seed points with row as coordinates"
-        seed_points = np.atleast_2d(seed_points)
+    def iris_in_rational_space(self, seed_points, termination_threshold=2e-2, iteration_limit=1000):
+        """
+        Create IRIS regions in the rational parametrization of the forward kinematics. Calling this method will
+        overwrite any stored seedpoints, regions, and ellipses stored in the class member variables
+        :param seed_points: seed point for IRIS. Each row is considered a seed point
+        :param termination_threshold: Threshold where change of volume of ellipse is considered negligible
+        :param iteration_limit: Maximum number of iterations for the IRIS algorithm
+        :return: the produced regions, the produced ellipses
+        """
+        ""
+        self.seed_points = np.atleast_2d(seed_points)
         regions = []
         ellipses = []
         for i in range(seed_points.shape[0]):
             start_time = time.time()
-            hpoly, ell = self._iris_rational_space(seed_points[i, :], require_containment_points=[seed_points[i, :]],
+            hpoly, ell = self._iris_rational_space(seed_points[i, :],
+                                                   require_containment_points=[self.seed_points[i, :]],
                                                     termination_threshold = termination_threshold,
                                                     iteration_limit=iteration_limit)
             print("Time: %6.2f \tVolume: %6.2f \tCenter:" % (time.time() - start_time, ell.Volume()),
@@ -88,18 +109,17 @@ class CertifiedIrisRegionGenerator():
             ellipses.append(ell)
         self.regions = regions
         self.ellipses = ellipses
-        self._iris_run_once = True
         return regions, ellipses
 
 
     def _iris_rational_space(self, point, require_containment_points=None, termination_threshold=2e-2,
                             iteration_limit=100):
         require_containment_points = require_containment_points if require_containment_points is not None else []
-        E = Hyperellipsoid(np.eye(3) / self._iris_starting_ellipse_vol, point)
+        E = Hyperellipsoid(np.eye(self.num_joints) / self._iris_starting_ellipse_vol, point)
         best_volume = E.Volume()
 
         P = HPolyhedron.MakeBox(self.t_lower_limits, self.t_upper_limits)
-        A = np.vstack((P.A(), np.zeros((self._iris_default_num_faces * len(self.pairs), 3))))
+        A = np.vstack((P.A(), np.zeros((self._iris_default_num_faces * len(self.pairs), self.num_joints))))
         b = np.concatenate((P.b(), np.zeros(self._iris_default_num_faces * len(self.pairs))))
 
         iteration = 0
@@ -108,7 +128,7 @@ class CertifiedIrisRegionGenerator():
             ## Find separating hyperplanes
 
             for geomA, geomB in self.pairs:
-                print(f"geomA={self.inspector.GetName(geomA)}, geomB={self.inspector.GetName(geomB)}")
+                # print(f"geomA={self.inspector.GetName(geomA)}, geomB={self.inspector.GetName(geomB)}")
                 # Run snopt at the beginning
                 while True:
                     X_WA = self.X_WA_list[int(self.body_indexes_by_geom_id[geomA])]
@@ -128,10 +148,11 @@ class CertifiedIrisRegionGenerator():
 
                         if self._iris_max_faces > 0 and num_faces > self._iris_max_faces+1:
                             break
-                        if num_faces >= A.shape[0]:
+                        if num_faces >= A.shape[0]-1:
                             # double number of faces if we exceed the number of faces preallocated
-                            A = np.vstack((A, np.zeros((A.shape[0], 3))))
-                            b = np.concatenate((P.b(), np.zeros(self._iris_default_num_faces * len(self.pairs))))
+                            A = np.vstack((A, np.zeros((A.shape[0], self.num_joints))))
+                            b = np.concatenate((b, np.zeros(b.shape[0])))
+
                     else:
                         break
 
@@ -188,17 +209,61 @@ class CertifiedIrisRegionGenerator():
 
     # region certification
     # region certification intialization
+    def certify_and_adjust_regions_by_linesearch(self, convergence_threshold = 1e-5):
+        if self.certification_problems is None:
+            raise ValueError("initialize certifier before calling this method")
+        new_regions_by_linesearch = []
+        certificates_by_new_region = {}
+        t_total_0 = time.time()
+        for i, (region, problem) in enumerate(self.certification_problems.items()):
+            t0 = time.time()
+            print(f"Starting Region {i + 1}/{len(self.certification_problems.keys())}")
+            new_region, eps, certificates = problem.optimize_region_by_linesearch(convergence_threshold=convergence_threshold)
+            t1 = time.time()
+            print(f"Completed Region {i + 1}/{len(self.certification_problems.keys())} in {t1 - t0}s")
+            new_regions_by_linesearch.append(new_region)
+            certificates_by_new_region[new_region] = certificates
+            print()
+        print(f"Total time to certify = {time.time() - t_total_0}s")
+        self.linesearch_regions = new_regions_by_linesearch
+        self.linesearch_regions_to_certificates_by_collision_pair_map = certificates_by_new_region
+
+    def certify_and_adjust_regions_by_bilinear_alternation(self, max_iter = 100,
+                                                                 stopped_improving_count_threshold = 5,
+                                                                 not_improving_threshold = 1e-4):
+        if self.certification_problems is None:
+            raise ValueError("initialize certifier before calling this method")
+        new_regions_by_alternation = []
+        certificates_by_new_region = {}
+        t_total_0 = time.time()
+        for i, (region, problem) in enumerate(self.certification_problems.items()):
+            t0 = time.time()
+            print(f"Starting Region {i + 1}/{len(self.certification_problems.keys())}")
+            new_region, eps, certificates = problem.optimize_region_by_alternation(max_iter = max_iter,
+                                                                                   stopped_improving_count_threshold = stopped_improving_count_threshold,
+                                                                                   not_improving_threshold = not_improving_threshold)
+            t1 = time.time()
+            print(f"Completed Region {i + 1}/{len(self.certification_problems.keys())} in {t1 - t0}s")
+            new_regions_by_alternation.append(new_region)
+            certificates_by_new_region[new_region] = certificates
+            print()
+        print(f"Total time to certify = {time.time() - t_total_0}s")
+        self.alternation_search_regions = new_regions_by_alternation
+        self.alternation_search_regions_to_certificates_by_collision_pair_map = certificates_by_new_region
+
     def initalize_certifier(self, plane_order = -1, strict_pos_tol = 1e-5, penalize_coeffs = True):
         if self.regions is None:
             raise ValueError("generate iris regions before attempting certification")
         self.certification_problems = dict.fromkeys(self.regions)
-        for region in self.regions:
-            self.certification_problems[region] = self._initialize_certifier_for_region(region, plane_order,
-                                                                                        strict_pos_tol, penalize_coeffs)
-            print()
+        for i, region in enumerate(self.regions):
+            self.certification_problems[region] = self._initialize_certifier_for_region(region,
+                                                                                        self.seed_points[i,:],
+                                                                                        plane_order,
+                                                                                        strict_pos_tol,
+                                                                                        penalize_coeffs)
         return self.certification_problems
 
-    def _initialize_certifier_for_region(self, region, plane_order = -1,
+    def _initialize_certifier_for_region(self, region, seed_point, plane_order = -1,
                                          strict_pos_tol = 1e-5, penalize_coeffs = True):
         with _log_time_usage("Time to initialize region program"):
             num_faces = region.A().shape[0]
@@ -206,29 +271,28 @@ class CertifiedIrisRegionGenerator():
             certify_for_fixed_eps_prog = MathematicalProgram()
             certify_for_fixed_multiplier_prog = MathematicalProgram()
 
-            with _log_time_usage("time to create maps: "):
-                # maps a collision pair to a plane (a(t), b(t)) that will certify its collision freeness
-                collision_pair_to_plane_variable_map = dict.fromkeys(self.pairs)
-                collision_pair_to_plane_poly_map = dict.fromkeys(self.pairs)
+            # maps a collision pair to a plane (a(t), b(t)) that will certify its collision freeness
+            collision_pair_to_plane_variable_map = dict.fromkeys(self.pairs)
+            collision_pair_to_plane_poly_map = dict.fromkeys(self.pairs)
 
-                # maps a geom id and vertex number to a polynomial which must be positive to be certified and a set of multipliers
-                geom_id_and_vert_to_pos_poly_and_multiplier_variable_map = {}
+            # maps a geom id and vertex number to a polynomial which must be positive to be certified and a set of multipliers
+            geom_id_and_vert_to_pos_poly_and_multiplier_variable_map = {}
 
-                for geomA, geomB in self.pairs:
-                    (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) = \
-                        self.initialize_separating_hyperplanes_polynomials(geomA, geomB, strict_pos_tol = strict_pos_tol, plane_order=plane_order)
-                    collision_pair_to_plane_variable_map[(geomA, geomB)] = (a_vars, b_vars)
-                    collision_pair_to_plane_poly_map[(geomA, geomB)] = (a_poly, b_poly)
-                    for i, p in enumerate(plane_constraint_polynomials_A):
-                        multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
-                        geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomA, i)] = (p, multipliers_map)
-                    for i, p in enumerate(plane_constraint_polynomials_B):
-                        multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
-                        geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomB, i)] = (p, multipliers_map)
+            for geomA, geomB in self.pairs:
+                (a_poly, b_poly, a_vars, b_vars), (plane_constraint_polynomials_A, plane_constraint_polynomials_B) = \
+                    self.initialize_separating_hyperplanes_polynomials(geomA, geomB, strict_pos_tol = strict_pos_tol, plane_order=plane_order)
+                collision_pair_to_plane_variable_map[(geomA, geomB)] = (a_vars, b_vars)
+                collision_pair_to_plane_poly_map[(geomA, geomB)] = (a_poly, b_poly)
+                for i, p in enumerate(plane_constraint_polynomials_A):
+                    multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
+                    geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomA, i)] = (p, multipliers_map)
+                for i, p in enumerate(plane_constraint_polynomials_B):
+                    multipliers_map = self.initialize_N_lagrange_multipliers_by_poly(p, num_faces)
+                    geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[(geomB, i)] = (p, multipliers_map)
 
         with _log_time_usage("time to create Region Certification Problem: "):
             certification_problem = RegionCertificationProblem(
-                region, certify_for_fixed_eps_prog, certify_for_fixed_multiplier_prog,
+                region, seed_point, certify_for_fixed_eps_prog, certify_for_fixed_multiplier_prog,
                 collision_pair_to_plane_variable_map, collision_pair_to_plane_poly_map,
                 geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
                 self.forward_kin.t(), self.mosek, penalize_coeffs
@@ -434,22 +498,15 @@ class CertifiedIrisRegionGenerator():
                                    self.geom_ids}
 
 class RegionCertificationProblem:
-    # ret = {
-    #     'certify_for_fixed_eps_prog': certify_for_fixed_eps_prog,
-    #     'certify_for_fixed_multiplier_prog': certify_for_fixed_multiplier_prog,
-    #     'collision_pair_to_plane_variable_map': collision_pair_to_plane_variable_map,
-    #     'geom_id_and_vert_to_pos_poly_and_multiplier_variable_map': geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
-    #     'cur_eps_value': 0
-    # }
-
-    def __init__(self, region, certify_for_fixed_eps_prog,
+    def __init__(self, region, seed_point, certify_for_fixed_eps_prog,
                  certify_for_fixed_multiplier_prog,
                  collision_pair_to_plane_variable_map,
                  collision_pair_to_plane_poly_map,
                  geom_id_and_vert_to_pos_poly_and_multiplier_variable_map,
                  t_array,
                  solver,
-                 penalize_plane_coeffs = True):
+                 penalize_plane_coeffs = True,
+                 max_region_adjustment_tolerance = 1):
 
         self.certify_for_fixed_eps_prog = certify_for_fixed_eps_prog
         self.certify_for_fixed_multiplier_prog = certify_for_fixed_multiplier_prog
@@ -458,6 +515,8 @@ class RegionCertificationProblem:
 
         self.certify_for_fixed_eps_prog.AddIndeterminates(self.t_array)
         self.certify_for_fixed_multiplier_prog.AddIndeterminates(self.t_array)
+        self.solver = solver
+
 
         self.collision_pair_to_plane_variable_map = collision_pair_to_plane_variable_map
         self.collision_pair_to_plane_poly_map = collision_pair_to_plane_poly_map
@@ -470,18 +529,140 @@ class RegionCertificationProblem:
         self.penalize_plane_coeffs = penalize_plane_coeffs
 
         self.region = region
+        self.seed_point = seed_point
         self.num_faces = region.b().shape[0]
 
-        self.cur_eps = np.zeros(self.num_faces)
+        self.max_region_adjustment_tolerance = max_region_adjustment_tolerance
+
         self.fixed_epsilon_result = None
         self.fixed_multiplier_result = None
 
         self.var_eps = self.certify_for_fixed_multiplier_prog.NewContinuousVariables(self.num_faces, 'eps')
+        self.var_eps_box_constraint = None
+        self._cur_eps = np.zeros(self.num_faces)
+        self.min_eps = np.zeros(self.num_faces)
+        self.max_eps = np.inf*np.ones(self.num_faces)
+        #initializes self.cur_eps
+        self._initialize_max_eps_via_max_shrinkage()
 
         self._prepare_fixed_epsilon_problem()
         self._prepare_fixed_multiplier_problem()
 
-        self.solver = solver
+    def optimize_region_by_linesearch(self, convergence_threshold = 1e-5):
+        """
+        search for the best epsilon shrinkage we can certify via an adapted bisection linesearch. At every step, we
+        attempt to certify Ct <= d-eps for eps = (max_eps + min_eps)/2. If we fail, we set min_eps = cur_eps and continue
+        If we succeed, we try to further shrink epsilon via the fixed multiplier program. Then we set max_eps = cur_eps
+        and reset min_eps = 0. This ensures a coordinatewise monotonic decrease in eps. As the problem is not
+        quasi-convex in eps, resetting min_eps = 0 is a useful trick to keep getting eps to decrease
+        :param convergence_threshold: Exit condition when max_eps and min_eps are close enough
+        :return: new_region, best_eps
+        """
+        #reset bounds
+        self.min_eps = np.zeros(self.num_faces)
+        self._initialize_max_eps_via_max_shrinkage()
+
+        best_region = HPolyhedron(self.region.A(), self.region.b() - self.max_eps)
+        while np.all(self.max_eps - self.min_eps >= convergence_threshold):
+            self.cur_eps = (self.max_eps + self.min_eps) / 2
+            print(f"min_eps = {self.min_eps}")
+            print(f"cur_eps = {self.cur_eps}")
+            print(f"max_eps = {self.max_eps}")
+
+            print(f"Biggest difference: {np.max(self.max_eps - self.min_eps)}")
+            print(f"Smallest difference: {np.min(self.max_eps - self.min_eps)}")
+            fixed_eps_success, collision_pairs_to_plane_result_map, \
+            geom_id_and_vert_to_pos_poly_and_multiplier_result_map, \
+            geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map = \
+                self.attempt_certification_for_epsilon(self.cur_eps)
+            if fixed_eps_success:
+                print(f"Fixed eps is success")
+                best_region = HPolyhedron(self.region.A(), self.region.b() - self.cur_eps)
+                self.max_eps = self.cur_eps
+                fixed_mult_success, \
+                collision_pair_to_plane_result_map, \
+                new_region, eps = \
+                    self.attempt_reduce_eps_in_certificate(
+                        geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map)
+                if fixed_mult_success:
+                    print(f"Fixed mults is success")
+                    self.max_eps = eps
+                    self.min_eps = np.zeros(self.num_faces)
+                    best_region = new_region
+            else:
+                print(f"Fixed eps is not success")
+                self.min_eps = self.cur_eps.copy()
+            print()
+        return best_region, self.cur_eps, self.collision_pair_to_plane_result_map
+
+    def optimize_region_by_alternation(self, not_improving_threshold = 1e-5, stopped_improving_count_threshold = 3, max_iter = 100):
+        """
+        Search for the smallest modification of this region that we can certify. We begin by using the maximum shrinkage
+        of the region which still contains the original seed point to seed the bilinear alternation. If this fails, we
+        declare that we cannot certify the region. If this succeeds we begin the bilinear alternation.
+
+        :param not_improving_threshold: The maximum change in epsilon which is considered a failure to improve
+        :param stopped_improving_count_threshold: number of consecutive times we fail to improve before exitting
+        :param max_iter: maximum iterations to run bilinear alternations
+        :return: new_region, epsilon. None, num_faces x 1 nan vector if maximum epsilon shrinkage fails
+        """
+        # reset bounds
+        self.min_eps = np.zeros(self.num_faces)
+        self._initialize_max_eps_via_max_shrinkage()
+
+        C = self.region.A()
+        d = self.region.b()
+
+        self.cur_eps = self.max_eps
+        success, collision_pairs_to_plane_result_map, \
+        geom_id_and_vert_to_pos_poly_and_multiplier_result_map, \
+        geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map = \
+            self.attempt_certification_for_epsilon(self.cur_eps)
+        if not success:
+            return None, np.nan*np.ones(self.num_faces), None
+
+        best_region = HPolyhedron(C, d-self.cur_eps)
+        stopped_improving_count = 0
+        iter_num = 0
+        while stopped_improving_count <= stopped_improving_count_threshold and iter_num <= max_iter:
+
+            last_eps = self.cur_eps
+            success, collision_pairs_to_plane_result_map, \
+            geom_id_and_vert_to_pos_poly_and_multiplier_result_map, \
+            geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map = \
+                self.attempt_certification_for_epsilon(self.cur_eps)
+
+            if success:
+                best_region = HPolyhedron(C, d - self.cur_eps)
+
+                fixed_mult_success, \
+                collision_pair_to_plane_result_map, \
+                new_region, eps = \
+                    self.attempt_reduce_eps_in_certificate(
+                        geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map)
+                if iter_num % 10 == 0:
+                    print(f"iter {iter_num}/{max_iter}")
+                    print(f"Fixed eps "
+                      f"is success = {success}")
+                    print(f"Fixed mult program is success = {fixed_mult_success}")
+                    print(f"Cur eps is \n{self.cur_eps}")
+                    print(f"Improvement {np.linalg.norm(self.cur_eps - last_eps)}")
+                if fixed_mult_success is False:
+                    return best_region, self.cur_eps, collision_pair_to_plane_result_map
+                else:
+                    best_region = new_region
+                    improvement = np.linalg.norm(last_eps - self.cur_eps)
+                    did_improve = improvement >= not_improving_threshold
+                    if did_improve:
+                        stopped_improving_count = 0
+                    else:
+                        stopped_improving_count += 1
+            else:
+                return best_region, self.cur_eps, self.collision_pair_to_plane_result_map
+            iter_num += 1
+
+        return best_region, self.cur_eps, self.collision_pair_to_plane_result_map
+
 
     @property
     def cur_eps(self):
@@ -490,6 +671,7 @@ class RegionCertificationProblem:
     @cur_eps.setter
     def cur_eps(self, val):
         self._cur_eps = val
+        self._change_var_eps_constraint(self._cur_eps)
 
     def _extract_planes(self, result):
         for k, (a, b) in self.collision_pair_to_plane_poly_map.items():
@@ -609,8 +791,6 @@ class RegionCertificationProblem:
             self.geom_id_and_vert_to_pos_poly_and_putinar_preallocated_cone[geom_id_and_vert] = \
                 (poly, putinar_cone_poly)
 
-            # self.geom_id_and_vert_to_positive_poly_eq_constraint[geom_id_and_vert] = \
-
     def attempt_reduce_eps_in_certificate(self, geom_id_and_vert_to_pos_poly_and_multiplier_map):
         """
         for a fixed set of multipliers, try to reduce epsilon as much as possible. This program should always be feasible
@@ -618,6 +798,7 @@ class RegionCertificationProblem:
         :param geom_id_and_vert_to_pos_poly_and_multiplier_map: (geom_id, vertex_number) ->
         (polynomial defined by plane, multiplier certifying positivity)
         :return: True, (collision_pair) -> (a(t), b(t)), certified_region, pos_poly_to_multiplier_map certificate
+        or False, None, None if numerically infeasible
         """
         self.build_fixed_multiplier_problem(geom_id_and_vert_to_pos_poly_and_multiplier_map)
         self.fixed_multiplier_result = self.solver.Solve(self.certify_for_fixed_multiplier_prog)
@@ -627,33 +808,39 @@ class RegionCertificationProblem:
             return self.fixed_multiplier_result.is_success(), \
                    self.collision_pair_to_plane_result_map, \
                    new_region, \
-                   geom_id_and_vert_to_pos_poly_and_multiplier_map
-        raise ValueError("program was infeasible. Are the multipliers valid?")
-        return False, None, None
+                   self.fixed_multiplier_result.GetSolution(self.var_eps)
+        return False, None, None, None
 
-    def build_fixed_multiplier_problem(self, geom_id_and_vert_to_pos_poly_and_multiplier_map):
+    def build_fixed_multiplier_problem(self, geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map):
         """
         Precondition: call _prepare_fixed_multiplier_problem first
+        Constructs the fixed multiplier side of the bilinear alternation
         :return:
         """
+        # always try to reduce epsilon
+        self._change_var_eps_constraint(self.cur_eps)
+
         C = self.region.A()
         d = self.region.b()
-        for geom_id_and_vert, pos_poly_and_multiplier_map in geom_id_and_vert_to_pos_poly_and_multiplier_map.items():
+        for geom_id_and_vert, pos_poly_and_multiplier_map in geom_id_and_vert_to_pos_poly_variable_and_multiplier_result_map.items():
             if self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] is not None:
                 for constraint in self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert]:
                     self.certify_for_fixed_multiplier_prog.RemoveConstraint(constraint)
             pos_poly, multiplier_map = pos_poly_and_multiplier_map[0], pos_poly_and_multiplier_map[1]
-            rhs = multiplier_map[-1][0]
+            # we don't introduce any bilinearity by leaving the constant multiplier variable
+            rhs = self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map[geom_id_and_vert][1][-1][0]
+            # rhs = multiplier_map[-1][0]
             for i in range(self.var_eps.shape[0]):
                 e = self.var_eps[i]
-                ptmp = sym.Polynomial(d[i] - e - C[i, :] @ self.t_array)
+                rtmp = sym.Polynomial(d[i] - e - C[i, :] @ self.t_array)
                 # ensures that eps isn't considered an indeterminate
-                ptmp.SetIndeterminates(self.t_variables)
-                rhs += multiplier_map[i][0] * ptmp
+                rtmp.SetIndeterminates(self.t_variables)
+                rhs += multiplier_map[i][0] * rtmp
             rhs.SetIndeterminates(self.t_variables)
+
             self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier[geom_id_and_vert] = \
                 self.ManualAddEqualityConstraintsBetweenPolynomials(self.certify_for_fixed_multiplier_prog,
-                                                                    pos_poly, rhs)
+                                                                         pos_poly, rhs)
 
     def _prepare_fixed_multiplier_problem(self):
         """
@@ -669,12 +856,29 @@ class RegionCertificationProblem:
         self.geom_id_and_vert_to_positive_poly_eq_constraint_fixed_multiplier = dict.fromkeys(
             self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.keys()
         )
-        # var_eps must be positive
-        self.certify_for_fixed_multiplier_prog.AddBoundingBoxConstraint(np.zeros(self.num_faces), np.inf*np.ones(self.num_faces),
-                                                                        self.var_eps)
 
+        for geom_id_and_vert, poly_and_mult in self.geom_id_and_vert_to_pos_poly_and_multiplier_variable_map.items():
+            (poly, multiplier_map) = poly_and_mult[0], poly_and_mult[1]
+            l, Q = multiplier_map[-1]
+            self.certify_for_fixed_multiplier_prog.AddDecisionVariables(Q[np.triu_indices(Q.shape[0])])
+            self.certify_for_fixed_multiplier_prog.AddSosConstraint(l)
+
+        # ensure seed point stays in the region to prevent constructing empty set
+        C = self.region.A()
+        d = self.region.b()
+        formulas = np.array(
+            [sym.Expression(C[i, :] @ self.seed_point) <= d[i] - self.var_eps[i] for i in range(self.num_faces)])
+        self.certify_for_fixed_multiplier_prog.AddLinearConstraint(formulas)
 
     def _add_plane_to_prog(self, prog, a_coeffs, b_coeffs, penalize_coeffs=True):
+        """
+        add the plane polynomial a^Tx + b = 0 as decision variables to the problem
+        :param prog: program to add variables
+        :param a_coeffs:
+        :param b_coeffs:
+        :param penalize_coeffs: whether add the two norm cost norm(a)^2 + norm(b)^2 to the program
+        :return:
+        """
         prog.AddDecisionVariables(a_coeffs)
         prog.AddDecisionVariables(b_coeffs)
 
@@ -703,3 +907,41 @@ class RegionCertificationProblem:
     def _extract_new_region(self, result):
         self.cur_eps = result.GetSolution(self.var_eps)
         return HPolyhedron(self.region.A(), self.region.b()-self.cur_eps)
+
+    def _change_var_eps_constraint(self, eps):
+        """
+        updates the var_eps constraint so that we are always improving each face
+        :param eps: update to the var_eps constraint
+        :return:
+        """
+        if self.var_eps_box_constraint is not None:
+            self.certify_for_fixed_multiplier_prog.RemoveConstraint(self.var_eps_box_constraint)
+        self.var_eps_box_constraint = self.certify_for_fixed_multiplier_prog.AddBoundingBoxConstraint(
+            np.zeros(self.num_faces), eps, self.var_eps)
+
+    def _initialize_max_eps_via_max_shrinkage(self):
+        """
+        Finds the maximum shrinkage Ct <=d - eps such that the seed point used to construct this region is contained
+        within. This is a good way to initialize the bilinear alternations such which typically makes the certification
+        feasible
+        """
+        shrinkage_prog = MathematicalProgram()
+        shrinkage_prog.AddDecisionVariables(self.var_eps)
+
+        # keep var_eps positive
+        shrinkage_prog.AddBoundingBoxConstraint(np.zeros(self.num_faces),
+                                                np.inf * np.ones(self.num_faces),
+                                                self.var_eps)
+        # ensure seed point stays in the region to prevent constructing empty set
+        C = self.region.A()
+        d = self.region.b()
+        formulas = np.array(
+            [sym.Expression(C[i, :] @ self.seed_point) <= d[i] - self.var_eps[i] for i in range(self.num_faces)])
+        shrinkage_prog.AddLinearConstraint(formulas)
+
+        # maximize epsilon
+        shrinkage_prog.AddLinearCost(-np.ones(self.num_faces) @ self.var_eps)
+        result = self.solver.Solve(shrinkage_prog)
+        if not result.is_success():
+            raise ValueError("Initialization of epsilon failed. This should only occur if the seedpoint is not contained in the region")
+        self.max_eps = result.GetSolution(self.var_eps)

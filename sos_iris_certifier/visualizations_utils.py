@@ -8,6 +8,7 @@ from pydrake.all import RotationMatrix, RigidTransform
 import colorsys
 import itertools
 from fractions import Fraction
+from t_space_utils import convert_t_to_q, convert_q_to_t
 
 def infinite_hues():
     yield Fraction(0)
@@ -232,32 +233,34 @@ def get_rotation_matrix(axis, theta):
     return R
 
 
-def plot_regions(vis, regions, ellipses):
+def plot_regions(vis, regions, ellipses = None, region_suffix=''):
+    colors = n_colors(len(regions))
     for i, region in enumerate(regions):
-        c1 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
-        c2 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
-        c3 = int(np.clip(255 * np.random.rand(), a_min=0, a_max=255))
-        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex((c1, c2, c3)), wireframe=True)
+        c = colors[i]
+        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=True)
         mat.opacity = 0.5
         plot_3d_poly(region=region,
                            resolution=30,
-                           vis=vis['iris']['regions'],
+                           vis=vis['iris']['regions'+region_suffix],
                            name=str(i),
                            mat=mat)
+        if ellipses is not None:
+            C = ellipses[i].A()  # [:, (0,2,1)]
+            d = ellipses[i].center()  # [[0,2,1]]
+            radii, R = np.linalg.eig(C.T @ C)
+            R[:, 0] = R[:, 0] * np.linalg.det(R)
+            Rot = RotationMatrix(R)
 
-        C = ellipses[i].A()  # [:, (0,2,1)]
-        d = ellipses[i].center()  # [[0,2,1]]
-        radii, R = np.linalg.eig(C.T @ C)
-        R[:, 0] = R[:, 0] * np.linalg.det(R)
-        Rot = RotationMatrix(R)
+            transf = RigidTransform(Rot, d)
+            mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=True)
+            mat.opacity = 0.15
+            vis['iris']['ellipses'+region_suffix][str(i)].set_object(
+                meshcat.geometry.Ellipsoid(np.divide(1, np.sqrt(radii))),
+                mat)
 
-        transf = RigidTransform(Rot, d)
-        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex((c1, c2, c3)), wireframe=True)
-        mat.opacity = 0.15
-        vis['iris']['ellipses'][str(i)].set_object(
-            meshcat.geometry.Ellipsoid(np.divide(1, np.sqrt(radii))),
-            mat)
-
-        vis['iris']['ellipses'][str(i)].set_transform(transf.GetAsMatrix4())
+            vis['iris']['ellipses'+region_suffix][str(i)].set_transform(transf.GetAsMatrix4())
 
     return vis
+
+
+

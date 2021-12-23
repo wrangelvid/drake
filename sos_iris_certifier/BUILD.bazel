@@ -40,7 +40,7 @@ filegroup(
 ##########################################################
 
 drake_jupyter_py_binary(
-    name = "test",
+    name = "sos_iris_example",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
@@ -49,6 +49,7 @@ drake_jupyter_py_binary(
     deps = [
         "//bindings/pydrake",
         "//sos_iris_certifier:certified_iris_generator",
+        "//sos_iris_certifier:iris_plant_visualizer",
         "//sos_iris_certifier:iris_utils",
         "//sos_iris_certifier:visualizations_utils",
     ],
@@ -85,14 +86,6 @@ drake_py_library(
 )
 
 drake_py_library(
-    name = "rrt",
-    srcs = [
-        "rrt.py",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-drake_py_library(
     name = "visualizations_utils",
     srcs = [
         "visualizations_utils.py",
@@ -110,26 +103,6 @@ drake_py_library(
 )
 
 drake_py_library(
-    name = "prm",
-    srcs = [
-        "prm.py",
-    ],
-    visibility = ["//visibility:public"],
-    deps = ["//bindings/pydrake"],
-)
-
-drake_py_library(
-    name = "rrtiris",
-    srcs = [
-        "rrtiris.py",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//bindings/pydrake",
-    ],
-)
-
-drake_py_library(
     name = "iris_t_space",
     srcs = [
         "iris_t_space.py",
@@ -137,5 +110,18 @@ drake_py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//bindings/pydrake",
+    ],
+)
+
+drake_py_library(
+    name = "iris_plant_visualizer",
+    srcs = [
+        "iris_plant_visualizer.py",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//bindings/pydrake",
+        "//sos_iris_certifier:iris_utils",
+        "//sos_iris_certifier:t_space_utils",
     ],
 )
