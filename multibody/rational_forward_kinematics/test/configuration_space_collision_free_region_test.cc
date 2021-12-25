@@ -1,5 +1,8 @@
 #include "drake/multibody/rational_forward_kinematics/configuration_space_collision_free_region.h"
 
+#include <chrono>
+#include <limits>
+
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
@@ -7,6 +10,8 @@
 #include "drake/multibody/inverse_kinematics/inverse_kinematics.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
 #include "drake/multibody/rational_forward_kinematics/test/rational_forward_kinematics_test_utilities.h"
+#include "drake/solvers/common_solver_option.h"
+#include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -16,6 +21,8 @@ using drake::VectorX;
 using drake::math::RigidTransformd;
 using drake::math::RotationMatrixd;
 using drake::multibody::BodyIndex;
+
+const double kInf = std::numeric_limits<double>::infinity();
 
 void CheckGenerateLinkOnOneSideOfPlaneRationalFunction(
     const RationalForwardKinematics& rational_forward_kinematics,
@@ -302,7 +309,7 @@ TEST_F(IiwaConfigurationSpaceTest, TestConstructor) {
                        obstacles_[1]->get_id(), iiwa_link_[4]);
 }
 
-TEST_F(IiwaConfigurationSpaceTest, GenerateLinkOnOneSideOfPlanePolynomials) {
+TEST_F(IiwaConfigurationSpaceTest, GenerateLinkOnOneSideOfPlanePolynomials1) {
   ConfigurationSpaceCollisionFreeRegion dut(
       *iiwa_, {link7_polytopes_[0], link7_polytopes_[1], link5_polytopes_[0]},
       obstacles_, SeparatingPlaneOrder::kConstant);
@@ -315,6 +322,80 @@ TEST_F(IiwaConfigurationSpaceTest, GenerateLinkOnOneSideOfPlanePolynomials) {
   const auto rationals = dut.GenerateLinkOnOneSideOfPlaneRationals(
       Eigen::VectorXd::Zero(7), filtered_collision_pairs);
   EXPECT_EQ(rationals.size(), 80);
+}
+
+TEST_F(IiwaConfigurationSpaceTest, GenerateLinkOnOneSideOfPlaneRationals2) {
+  // Test when q_not_in_collision is different from q_star.
+  ConfigurationSpaceCollisionFreeRegion dut(*iiwa_, {link7_polytopes_[0]},
+                                            {obstacles_[0]},
+                                            SeparatingPlaneOrder::kConstant);
+  EXPECT_EQ(dut.separation_planes().size(), 1);
+  const Eigen::VectorXd q_star = Eigen::VectorXd::Zero(7);
+  const ConfigurationSpaceCollisionFreeRegion::FilteredCollisionPairs
+      filtered_collision_pairs{};
+  Eigen::VectorXd q_not_in_collision(7);
+  q_not_in_collision << 0.5, 0.5, -0.1, 0.3, 0.2, 0.1, 0.1;
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+  plant.SetPositions(context.get(), q_not_in_collision);
+  ASSERT_TRUE(dut.IsPostureCollisionFree(*context));
+  const auto rationals = dut.GenerateLinkOnOneSideOfPlaneRationals(
+      q_star, filtered_collision_pairs, q_not_in_collision);
+  EXPECT_EQ(rationals.size(),
+            link7_polytopes_[0]->p_BV().cols() + obstacles_[0]->p_BV().cols());
+  const drake::multibody::BodyIndex expressed_boyd_index =
+      internal::FindBodyInTheMiddleOfChain(plant, plant.world_body().index(),
+                                           link7_polytopes_[0]->body_index());
+  Eigen::Vector3d p_AC;
+  plant.SetPositions(context.get(), q_not_in_collision);
+  plant.CalcPointsPositions(
+      *context, plant.get_body(obstacles_[0]->body_index()).body_frame(),
+      obstacles_[0]->p_BC(), plant.get_body(expressed_boyd_index).body_frame(),
+      &p_AC);
+  std::vector<Eigen::VectorXd> q_samples;
+  q_samples.push_back(
+      (Eigen::VectorXd(7) << 0.1, -0.2, 0.5, 0.3, 0.2, 0.1, 0.5).finished());
+  q_samples.push_back(
+      (Eigen::VectorXd(7) << 0.6, -0.4, 0.3, 0.2, 0.1, 0.4, 0.5).finished());
+  for (int i = 0; i < link7_polytopes_[0]->p_BV().cols(); ++i) {
+    EXPECT_EQ(rationals[i].a_order, SeparatingPlaneOrder::kConstant);
+    EXPECT_EQ(rationals[i].expressed_body_index, expressed_boyd_index);
+    for (const auto& q : q_samples) {
+      plant.SetPositions(context.get(), q);
+      Eigen::Vector3d p_AV;
+      plant.CalcPointsPositions(
+          *context,
+          plant.get_body(link7_polytopes_[0]->body_index()).body_frame(),
+          link7_polytopes_[0]->p_BV().col(i),
+          plant.get_body(expressed_boyd_index).body_frame(), &p_AV);
+      const Eigen::VectorXd t_val = ((q - q_star) / 2).array().tan();
+      symbolic::Environment env;
+      for (int j = 0; j < dut.rational_forward_kinematics().t().rows(); ++j) {
+        env.insert(dut.rational_forward_kinematics().t()(j), t_val(j));
+      }
+      const auto separating_plane =
+          dut.map_polytopes_to_separation_planes()
+              .find(std::make_pair(link7_polytopes_[0]->get_id(),
+                                   obstacles_[0]->get_id()))
+              ->second;
+      for (int j = 0; j < separating_plane->decision_variables.rows(); ++j) {
+        // Set the separating plane a_A's decision variable to some random
+        // number.
+        env.insert(separating_plane->decision_variables(j), 0.2 * j + 0.1);
+      }
+
+      const double rational_val_expected = rationals[i].rational.Evaluate(env);
+      Eigen::Vector3d a_A_val;
+      for (int j = 0; j < 3; ++j) {
+        a_A_val(j) = rationals[i].a_A(j).Evaluate(env);
+      }
+      const double rational_val =
+          rationals[i].plane_side == PlaneSide::kPositive
+              ? a_A_val.dot(p_AV - p_AC) - 1
+              : 1 - a_A_val.dot(p_AV - p_AC);
+      EXPECT_NEAR(rational_val_expected, rational_val, 1E-10);
+    }
+  }
 }
 
 TEST_F(IiwaConfigurationSpaceTest, TestConstructorWithAffineSeparatingPlane) {
@@ -389,14 +470,15 @@ GenerateMonomialsForLinkOnOneSideOfPlaneRationalConstantSeparatingPlane(
   return monomial_set;
 }
 
-// The rational's numerator's monomials should be a subset of tⱼ ∏ᵢ tᵢⁿⁱ and ∏ᵢ
-// tᵢⁿⁱ where tᵢ is in @p t_on_half_chain, ni = 0, 1, 2, and tⱼ is in @p
-// t_on_whole_chain.
+// The rational's numerator's monomials should be a subset of tⱼ ∏ᵢ tᵢⁿⁱ and
+// ∏ᵢ / tᵢⁿⁱ where tᵢ is in @p t_on_half_chain,
+// ni = 0, 1, 2, and tⱼ is in @p t_on_whole_chain.
 std::unordered_set<drake::symbolic::Monomial>
-GenerateMonomialsForLinkOnOneSideOfPlaneRationalAffineSeparatingPlane(
-    const Eigen::Ref<const VectorX<drake::symbolic::Variable>>& t_on_half_chain,
-    const Eigen::Ref<const VectorX<drake::symbolic::Variable>>&
-        t_on_whole_chain) {
+        GenerateMonomialsForLinkOnOneSideOfPlaneRationalAffineSeparatingPlane(
+            const Eigen::Ref<const VectorX<drake::symbolic::Variable>>&
+                t_on_half_chain,
+            const Eigen::Ref<const VectorX<drake::symbolic::Variable>>&
+                t_on_whole_chain) {
   const std::unordered_set<drake::symbolic::Monomial> monomials_constant_plane =
       GenerateMonomialsForLinkOnOneSideOfPlaneRationalConstantSeparatingPlane(
           t_on_half_chain);
@@ -475,7 +557,7 @@ TEST_F(IiwaConfigurationSpaceTest, IsInCollision) {
   Eigen::VectorXd q(7);
   q << 0, 0, 0, 0, 0, 0, 0;
   iiwa_->SetPositions(context.get(), q);
-  EXPECT_FALSE(dut.IsPostureCollisionFree(*context));
+  EXPECT_TRUE(dut.IsPostureCollisionFree(*context));
 
   // Now solve a posture that link7 reaches obstacles_[1]
   drake::multibody::InverseKinematics ik(*iiwa_);
@@ -486,7 +568,171 @@ TEST_F(IiwaConfigurationSpaceTest, IsInCollision) {
   const auto result = drake::solvers::Solve(ik.prog());
   EXPECT_TRUE(result.is_success());
   iiwa_->SetPositions(context.get(), result.GetSolution(ik.q()));
-  EXPECT_TRUE(dut.IsPostureCollisionFree(*context));
+  EXPECT_FALSE(dut.IsPostureCollisionFree(*context));
+}
+
+// Checks if the polyhedron C * x <= d is bounded.
+bool IsPolyhedronBounded(const Eigen::Ref<const Eigen::MatrixXd>& C,
+                         const Eigen::Ref<const Eigen::VectorXd>& d) {
+  solvers::MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables(C.cols());
+  prog.AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf), d, x);
+  auto cost = prog.AddLinearCost(Eigen::VectorXd::Zero(x.rows()), 0, x);
+  for (int i = 0; i < x.rows(); ++i) {
+    Eigen::VectorXd new_cost_coeff = Eigen::VectorXd::Zero(x.rows());
+    new_cost_coeff(i) = 1;
+    cost.evaluator()->UpdateCoefficients(new_cost_coeff);
+    auto result = solvers::Solve(prog);
+    std::cout << i << " min \n";
+    if (!result.is_success()) {
+      return false;
+    } else {
+      std::cout << result.get_optimal_cost() << "\n";
+    }
+    new_cost_coeff(i) = -1;
+    cost.evaluator()->UpdateCoefficients(new_cost_coeff);
+    result = solvers::Solve(prog);
+    std::cout << i << " max \n";
+    if (!result.is_success()) {
+      return false;
+    } else {
+      std::cout << -result.get_optimal_cost() << "\n";
+    }
+  }
+  return true;
+}
+
+TEST_F(IiwaConfigurationSpaceTest,
+       ConstructProgramToVerifyCollisionFreePolytope) {
+  ConfigurationSpaceCollisionFreeRegion dut(*iiwa_, {link7_polytopes_[0]},
+                                            {obstacles_[0], obstacles_[1]},
+                                            SeparatingPlaneOrder::kAffine);
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+  const Eigen::VectorXd q_star = Eigen::VectorXd::Zero(7);
+  Eigen::VectorXd q_not_in_collision(7);
+  q_not_in_collision << 0.5, 0.3, -0.2, 0.1, 0.4, 0.2, 0.1;
+  plant.SetPositions(context.get(), q_not_in_collision);
+  ASSERT_TRUE(dut.IsPostureCollisionFree(*context));
+
+  // First generate a region C * t <= d.
+  Eigen::Matrix<double, 24, 7> C;
+  Eigen::Matrix<double, 24, 1> d;
+  // I create matrix C with arbitrary values, such that C * t is a small
+  // polytope surrounding q_not_in_collision.
+  // clang-format off
+  C << 1, 0, 0, 0, 2, 0, 0,
+       -1, 0, 0, 0, 0, 1, 0,
+       0, 1, 1, 0, 0, 0, 1,
+       0, -1, -2, 0, 0, -1, 0,
+       1, 1, 0, 2, 0, 0, 1,
+       1, 0, 2, -1, 0, 1, 0,
+       0, -1, 2, -2, 1, 3, 2,
+       0, 1, -2, 1, 2, 4, 3,
+       0, 3, -2, 2, 0, 1, -1,
+       1, 0, 3, 2, 0, -1, 1,
+       0, 1, -1, -2, 3, -2, 1,
+       1, 0, -1, 1, 3, 2, 0,
+       -1, -0.1, -0.2, 0, 0.3, 0.1, 0.1,
+       -2, 0.1, 0.2, 0.2, -0.3, -0.1, 0.1,
+       -1, 1, 1, 0, -1, 1, 0,
+       0, 0.2, 0.1, 0, -1, 0.1, 0,
+       0.1, 2, 0.2, 0.1, -0.1, -0.2, 0.1,
+       -0.1, -2, 0.1, 0.2, -0.15, -0.1, -0.1,
+       0.3, 0.5, 0.1, 0.7, -0.4, 1.2, 3.1,
+       -0.5, 0.3, 0.2, -0.5, 1.2, 0.7, -0.5,
+       0.4, 0.6, 1.2, -0.3, -0.5, 1.2, -0.1,
+       1.5, -0.1, 0.6, 1.5, 0.4, 2.1, 0.3,
+       0.5, 1.5, 0.3, 0.2, 1.5, -0.1, 0.5,
+       0.5, 0.2, -0.1, 1.2, -0.3, 1.1, -0.4;
+
+  // clang-format on
+  // Now I take some samples of t slightly away from q_not_in_collision. C * t
+  // <= d contains all these samples.
+  Eigen::Matrix<double, 7, 6> t_samples;
+  t_samples.col(0) = ((q_not_in_collision - q_star) / 2).array().tan();
+  t_samples.col(1) =
+      t_samples.col(0) +
+      (Eigen::VectorXd(7) << 0.11, -0.02, 0.03, 0.01, 0, 0.02, 0.02).finished();
+  t_samples.col(2) = t_samples.col(0) + (Eigen::VectorXd(7) << -0.005, 0.01,
+                                         -0.02, 0.01, 0.005, 0.01, -0.02)
+                                            .finished();
+  t_samples.col(3) = t_samples.col(0) + (Eigen::VectorXd(7) << 0.02, -0.13,
+                                         0.01, 0.02, -0.03, 0.01, 0.15)
+                                            .finished();
+  t_samples.col(4) = t_samples.col(0) + (Eigen::VectorXd(7) << 0.01, -0.04,
+                                         0.003, 0.01, -0.01, -0.11, -0.08)
+                                            .finished();
+  t_samples.col(5) = t_samples.col(0) + (Eigen::VectorXd(7) << -0.01, -0.02,
+                                         0.013, -0.02, 0.03, -0.03, -0.1)
+                                            .finished();
+  d = (C * t_samples).rowwise().maxCoeff();
+  ASSERT_TRUE(IsPolyhedronBounded(C, d));
+
+  ConfigurationSpaceCollisionFreeRegion::FilteredCollisionPairs
+      filtered_collision_pairs{};
+  auto clock_start = std::chrono::system_clock::now();
+  const auto rationals = dut.GenerateLinkOnOneSideOfPlaneRationals(
+      q_star, filtered_collision_pairs, q_not_in_collision);
+  auto ret = dut.ConstructProgramToVerifyCollisionFreePolytope(
+      rationals, C, d, filtered_collision_pairs);
+  auto clock_now = std::chrono::system_clock::now();
+  std::cout << "Elapsed Time: "
+            << static_cast<float>(
+                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                       clock_now - clock_start)
+                       .count()) /
+                   1000
+            << "s\n";
+  // First make sure that the lagrangians and verified polynomial has the right
+  // size.
+  EXPECT_EQ(ret.lagrangians.size(), rationals.size());
+  EXPECT_EQ(ret.verified_polynomials.size(), rationals.size());
+  for (const auto& lagrangian : ret.lagrangians) {
+    EXPECT_EQ(lagrangian.rows(), C.rows());
+    for (int i = 0; i < lagrangian.rows(); ++i) {
+      for (int j = 0; j < dut.rational_forward_kinematics().t().rows(); ++j) {
+        EXPECT_LE(
+            lagrangian(i).Degree(dut.rational_forward_kinematics().t()(j)), 2);
+      }
+    }
+  }
+  // Make sure that each term in verified_polynomial has at most degree 3 for
+  // each t, and at most one t has degree 3.
+  for (const auto& verified_poly : ret.verified_polynomials) {
+    for (const auto& [monomial, coeff] :
+         verified_poly.monomial_to_coefficient_map()) {
+      int degree_3_count = 0;
+      for (int i = 0; i < dut.rational_forward_kinematics().t().rows(); ++i) {
+        const int t_degree =
+            monomial.degree(dut.rational_forward_kinematics().t()(i));
+        EXPECT_LE(t_degree, 3);
+        if (t_degree == 3) {
+          degree_3_count++;
+        }
+      }
+      EXPECT_LE(degree_3_count, 1);
+    }
+  }
+  // Now check if ret.verified_polynomials is correct.
+  VectorX<symbolic::Polynomial> d_minus_Ct(d.rows());
+  for (int i = 0; i < d_minus_Ct.rows(); ++i) {
+    d_minus_Ct(i) = symbolic::Polynomial(
+        d(i) - C.row(i).dot(dut.rational_forward_kinematics().t()),
+        symbolic::Variables(dut.rational_forward_kinematics().t()));
+  }
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    symbolic::Polynomial eval_expected = rationals[i].rational.numerator();
+    for (int j = 0; j < C.rows(); ++j) {
+      eval_expected -= ret.lagrangians[i](j) * d_minus_Ct(j);
+    }
+    const symbolic::Polynomial eval = ret.verified_polynomials[i];
+    EXPECT_TRUE(eval.CoefficientsAlmostEqual(eval_expected, 1E-10));
+  }
+  solvers::SolverOptions solver_options;
+  solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
+  const auto result = solvers::Solve(*(ret.prog), std::nullopt, solver_options);
+  EXPECT_TRUE(result.is_success());
 }
 
 }  // namespace multibody

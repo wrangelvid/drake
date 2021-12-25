@@ -125,6 +125,7 @@ drake_cc_library(
 
 drake_cc_googletest(
     name = "configuration_space_collision_free_region_test",
+    timeout="long",
     deps = [
         ":configuration_space_collision_free_region",
         ":rational_forward_kinematics_test_utilities",

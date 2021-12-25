@@ -176,9 +176,17 @@ std::vector<LinkVertexOnPlaneSideRational>
 // Generate t space sos conditions
 ConfigurationSpaceCollisionFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
-    const FilteredCollisionPairs& filtered_collision_pairs) const {
-  auto context = rational_forward_kinematics_.plant().CreateDefaultContext();
-  rational_forward_kinematics_.plant().SetPositions(context.get(), q_star);
+    const FilteredCollisionPairs& filtered_collision_pairs,
+    const std::optional<Eigen::VectorXd>& q_not_in_collision) const {
+  auto context_not_in_collision =
+      rational_forward_kinematics_.plant().CreateDefaultContext();
+  if (q_not_in_collision.has_value()) {
+    rational_forward_kinematics_.plant().SetPositions(
+        context_not_in_collision.get(), q_not_in_collision.value());
+  } else {
+    rational_forward_kinematics_.plant().SetPositions(
+        context_not_in_collision.get(), q_star);
+  }
 
   const BodyIndex world_index =
       rational_forward_kinematics_.plant().world_body().index();
@@ -215,7 +223,7 @@ ConfigurationSpaceCollisionFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
           // find the positions of the center of B (which are expressed in frameB)
           // expressed in the frame A
           rational_forward_kinematics_.plant().CalcPointsPositions(
-              *context,
+              *context_not_in_collision,
               rational_forward_kinematics_.plant()
                   .get_body(obstacle->body_index())
                   .body_frame(),
@@ -343,7 +351,106 @@ void FindMonomialBasisForAffineSeparatingPlane(
     *monomial_basis_chain = it->second.second;
   }
 }
+
+// map the kinematics chain to monomial_basis.
+// If the separating plane has affine order, then the polynomial we want to
+// verify (in the numerator of 1 - aᵀ(x−c) or aᵀ(x−c)-1) only contains the
+// monomials tⱼ * ∏(tᵢ, dᵢ), where tᵢ is a t on the "half chain" from the
+// expressed frame to either the link or the obstacle, and dᵢ<=2. Namely at
+// most one variable has degree 3, all the other variables have degree <= 2.
+// If the separating plane has constant order, then the polynomial we want to
+// verify only contains the monomials ∏(tᵢ, dᵢ). In both cases, the monomial
+// basis for the SOS polynomial contains all monomials that each variable has
+// degree at most 1, and each variable is on the "half chain" from the expressed
+// body to this link (either the robot link or the obstacle).
+void FindMonomialBasisForPolytopicRegion(
+    const RationalForwardKinematics& rational_forward_kinematics,
+    const LinkVertexOnPlaneSideRational& rational,
+    std::unordered_map<OrderedKinematicsChain,
+                       VectorX<drake::symbolic::Monomial>,
+                       OrderedKinematicsChainHash>*
+        map_ordered_kinematics_chain_to_monomial_basis,
+    VectorX<drake::symbolic::Monomial>* monomial_basis_halfchain) {
+  // First check if the monomial basis for this kinematics chain has been
+  // computed.
+  const OrderedKinematicsChain ordered_kinematics_chain(
+      rational.link_polytope->body_index(), rational.expressed_body_index);
+  const auto it = map_ordered_kinematics_chain_to_monomial_basis->find(
+      ordered_kinematics_chain);
+  if (it == map_ordered_kinematics_chain_to_monomial_basis->end()) {
+    const auto t_halfchain = rational_forward_kinematics.FindTOnPath(
+        rational.link_polytope->body_index(), rational.expressed_body_index);
+    *monomial_basis_halfchain = GenerateMonomialBasisWithOrderUpToOne(
+        drake::symbolic::Variables(t_halfchain));
+    map_ordered_kinematics_chain_to_monomial_basis->emplace_hint(
+        it,
+        std::make_pair(ordered_kinematics_chain, *monomial_basis_halfchain));
+  } else {
+    *monomial_basis_halfchain = it->second;
+  }
+}
 }  // namespace
+
+ConfigurationSpaceCollisionFreeRegion::ConstructProgramReturn
+ConfigurationSpaceCollisionFreeRegion::
+    ConstructProgramToVerifyCollisionFreePolytope(
+        const std::vector<LinkVertexOnPlaneSideRational>& rationals,
+        const Eigen::Ref<const Eigen::MatrixXd>& C,
+        const Eigen::Ref<const Eigen::VectorXd>& d,
+        const FilteredCollisionPairs& filtered_collision_pairs,
+        const VerificationOption& verification_option) const {
+  ConfigurationSpaceCollisionFreeRegion::ConstructProgramReturn ret(
+      rationals.size());
+  // Add t as indeterminates
+  const auto& t = rational_forward_kinematics_.t();
+  ret.prog->AddIndeterminates(t);
+  // Add separation planes as decision variables
+  for (const auto& separation_plane : separation_planes_) {
+    if (!IsLinkPairCollisionIgnored(
+            separation_plane.positive_side_polytope->get_id(),
+            separation_plane.negative_side_polytope->get_id(),
+            filtered_collision_pairs)) {
+      ret.prog->AddDecisionVariables(separation_plane.decision_variables);
+    }
+  }
+
+  // Now build the polynomials d(i) - C.row(i) * t
+  DRAKE_DEMAND(C.rows() == d.rows() && C.cols() == t.rows());
+  VectorX<drake::symbolic::Polynomial> d_minus_Ct_polynomial(C.rows());
+  // d_minus_Ct_monomials = [t(0), t(1), ..., t(n-1), 1]
+  std::vector<symbolic::Monomial> d_minus_Ct_monomials;
+  for (int i = 0; i < t.rows(); ++i) {
+    d_minus_Ct_monomials.emplace_back(t(i));
+  }
+  d_minus_Ct_monomials.emplace_back();
+  for (int i = 0; i < C.rows(); ++i) {
+    symbolic::Polynomial::MapType d_minus_Ct_poly_map;
+    for (int j = 0; j < t.rows(); ++j) {
+      d_minus_Ct_poly_map.emplace(d_minus_Ct_monomials[j],
+                                  symbolic::Expression(-C(i, j)));
+    }
+    d_minus_Ct_poly_map.emplace(d_minus_Ct_monomials[t.rows()],
+                                symbolic::Expression(d(i)));
+    d_minus_Ct_polynomial(i) = symbolic::Polynomial(d_minus_Ct_poly_map);
+  }
+
+  std::unordered_map<OrderedKinematicsChain, VectorX<symbolic::Monomial>,
+                     OrderedKinematicsChainHash>
+      map_ordered_kinematics_chain_to_monomial_basis;
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    VectorX<symbolic::Monomial> monomial_basis_chain;
+    FindMonomialBasisForPolytopicRegion(
+        rational_forward_kinematics_, rationals[i],
+        &map_ordered_kinematics_chain_to_monomial_basis, &monomial_basis_chain);
+    // Now add the constraint that C*t<=d implies the rational being
+    // nonnegative.
+    std::tie(ret.lagrangians[i], ret.verified_polynomials[i]) =
+        AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
+            ret.prog.get(), rationals[i].rational, d_minus_Ct_polynomial,
+            monomial_basis_chain, verification_option);
+  }
+  return ret;
+}
 
 std::unique_ptr<drake::solvers::MathematicalProgram>
 // Actually constructs the programs
@@ -390,7 +497,7 @@ ConfigurationSpaceCollisionFreeRegion::ConstructProgramToVerifyCollisionFreeBox(
   // t on the kinematics chain.
   //
   // Case 1. when we use constant separating plane
-  // (SeparationPlaneOrder::kConstraint), we consider the chain from the
+  // (SeparationPlaneOrder::kConstant), we consider the chain from the
   // expressed body to the link (or the obstacle). In this case, t - t_lower and
   // t_upper - t contains the t on this chain, also the monomial basis are
   // generated from t on this chain.
@@ -668,12 +775,12 @@ bool ConfigurationSpaceCollisionFreeRegion::IsPostureCollisionFree(
     for (const auto& link_polytope : link_and_polytopes.second) {
       for (const auto& obstacle : obstacles_) {
         if (link_polytope->IsInCollision(*obstacle, X_WB, X_WW)) {
-          return true;
+          return false;
         }
       }
     }
   }
-  return false;
+  return true;
 }
 
 void ConfigurationSpaceCollisionFreeRegion::CalcConfigurationBoundsFromRho(
@@ -1507,6 +1614,34 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   for (const auto& item : poly_diff.monomial_to_coefficient_map()) {
     prog->AddLinearEqualityConstraint(item.second, 0);
   }
+}
+
+std::pair<VectorX<symbolic::Polynomial>, symbolic::Polynomial>
+AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
+    solvers::MathematicalProgram* prog,
+    const drake::symbolic::RationalFunction& polytope_on_one_side_rational,
+    const Eigen::Ref<const VectorX<symbolic::Polynomial>>& d_minus_Ct,
+    const Eigen::Ref<const VectorX<drake::symbolic::Monomial>>& monomial_basis,
+    const VerificationOption& verification_option) {
+  drake::symbolic::Polynomial verified_polynomial =
+      polytope_on_one_side_rational.numerator();
+  VectorX<symbolic::Polynomial> lagrangian(d_minus_Ct.rows());
+  for (int i = 0; i < d_minus_Ct.rows(); ++i) {
+    lagrangian(i) = prog->NewNonnegativePolynomial(
+                            monomial_basis, verification_option.lagrangian_type)
+                        .first;
+    verified_polynomial -= lagrangian(i) * d_minus_Ct(i);
+  }
+  const drake::symbolic::Polynomial verified_polynomial_expected =
+      prog->NewNonnegativePolynomial(monomial_basis,
+                                     verification_option.link_polynomial_type)
+          .first;
+  const symbolic::Polynomial poly_diff{verified_polynomial -
+                                       verified_polynomial_expected};
+  for (const auto& term : poly_diff.monomial_to_coefficient_map()) {
+    prog->AddLinearEqualityConstraint(term.second, 0);
+  }
+  return std::make_pair(lagrangian, verified_polynomial);
 }
 }  // namespace multibody
 }  // namespace drake

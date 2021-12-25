@@ -166,17 +166,56 @@ class ConfigurationSpaceCollisionFreeRegion {
   /**
    * Generate all the rational functions representing the the link vertices are
    * on the correct side of the planes.
+   * @param q_not_in_collision is used to compute the position of negative side
+   * polytope center. Namely in the separating hyperplane aᵀ(x−c)=1, the value c
+   * is evaluated at this posture, that the negative side of the separating
+   * hyperplane will always contain the polytope center at this posture. Set to
+   * std::nullopt and we will use q_star as q_not_in_collision.
    */
   std::vector<LinkVertexOnPlaneSideRational>
   GenerateLinkOnOneSideOfPlaneRationals(
       const Eigen::Ref<const Eigen::VectorXd>& q_star,
-      const FilteredCollisionPairs& filtered_collision_pairs) const;
+      const FilteredCollisionPairs& filtered_collision_pairs,
+      const std::optional<Eigen::VectorXd>& q_not_in_collision =
+          std::nullopt) const;
 
   const std::unordered_map<std::pair<ConvexGeometry::Id, ConvexGeometry::Id>,
                            const SeparationPlane*, GeometryIdPairHash>&
   map_polytopes_to_separation_planes() const {
     return map_polytopes_to_separation_planes_;
   }
+
+  /**
+   * This struct is the return type of
+   * ConstructProgramToVerifyCollisionFreePolytope, to verify the region C * t
+   * <= d is collision free.
+   */
+  struct ConstructProgramReturn {
+    ConstructProgramReturn(size_t rationals_size)
+        : prog{new solvers::MathematicalProgram()},
+          lagrangians{rationals_size},
+          verified_polynomials{rationals_size} {}
+    std::unique_ptr<solvers::MathematicalProgram> prog;
+    // lagrangians has size rationals.size(), namely it is the number of
+    // (link_polytope, obstacle_polytope) pairs. lagrangians[i] has size
+    // C.rows()
+    std::vector<VectorX<symbolic::Polynomial>> lagrangians;
+    // verified_polynomial[i] is p(t) - l(t)ᵀ(d - C*t)
+    std::vector<symbolic::Polynomial> verified_polynomials;
+  };
+
+  /**
+   * Constructs an optimization program to verify that the polytopic region C *
+   * t <= d is collision free. The program verifies that C * t <= d implies
+   * `rationals[i]` >= 0 for all i, where rationals[i] is the result of calling
+   * GenerateLinkOnOneSideOfPlaneRationals.
+   */
+  ConstructProgramReturn ConstructProgramToVerifyCollisionFreePolytope(
+      const std::vector<LinkVertexOnPlaneSideRational>& rationals,
+      const Eigen::Ref<const Eigen::MatrixXd>& C,
+      const Eigen::Ref<const Eigen::VectorXd>& d,
+      const FilteredCollisionPairs& filtered_collision_pairs,
+      const VerificationOption& verification_option = {}) const;
 
   /**
    * Construct an optimization program to verify the the box region t_lower <= t
@@ -645,6 +684,23 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
         t_upper_minus_t,
     const Eigen::Ref<const drake::VectorX<drake::symbolic::Monomial>>&
         monomial_basis,
+    const VerificationOption& verification_option = {});
+
+/**
+ * Impose the constraint that
+ * l(t) >= 0
+ * p(t) - l(t)ᵀ(d - C*t) >= 0.
+ * where l(t) is the Lagrangian multipliers. p(t) is the numerator of the
+ * rational function `polytope_on_one_side_rational`.
+ * @param monomial_basis The monomial basis for l(t) and p(t) - l(t)ᵀ(d - C*t)
+ * @return (l(t), p(t) - l(t)ᵀ(d-C*t))
+ */
+std::pair<VectorX<symbolic::Polynomial>, symbolic::Polynomial>
+AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
+    solvers::MathematicalProgram* prog,
+    const drake::symbolic::RationalFunction& polytope_on_one_side_rational,
+    const Eigen::Ref<const VectorX<symbolic::Polynomial>>& d_minus_Ct,
+    const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
     const VerificationOption& verification_option = {});
 
 std::vector<ConfigurationSpaceCollisionFreeRegion::FilteredCollisionPairsForBox>
