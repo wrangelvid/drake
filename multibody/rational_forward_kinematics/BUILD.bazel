@@ -80,6 +80,26 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "cspace_free_region",
+    srcs = [
+        "cspace_free_region.cc",
+        #"filtered_collision_pairs2.cc",
+    ],
+    hdrs = [
+        "cspace_free_region.h",
+    ],
+    deps = [
+        ":convex_geometry",
+        ":generate_monomial_basis_util",
+        ":plane_side",
+        ":rational_forward_kinematics_core",
+        "//solvers:mathematical_program",
+        "//solvers:mathematical_program_result",
+        "//solvers:mosek_solver",
+    ],
+)
+
+drake_cc_library(
     name = "configuration_space_collision_free_region",
     srcs = [
         "configuration_space_collision_free_region.cc",
@@ -123,12 +143,46 @@ drake_cc_library(
     ],
 )
 
+drake_cc_library(
+    name = "rational_forward_kinematics_test_utilities2",
+    testonly = 1,
+    srcs = ["test/rational_forward_kinematics_test_utilities2.cc"],
+    hdrs = ["test/rational_forward_kinematics_test_utilities2.h"],
+    data = [
+        ":models",
+        "//examples/kuka_iiwa_arm:models",
+        "//manipulation/models/iiwa_description:models",
+    ],
+    deps = [
+        ":convex_geometry",
+        "//common:find_resource",
+        "//multibody/benchmarks/kuka_iiwa_robot",
+        "//multibody/parsing:parser",
+        "//multibody/plant",
+        "//solvers:solve",
+        "//systems/analysis:simulator",
+        "//systems/rendering:multibody_position_to_geometry_pose",
+    ],
+)
+
 drake_cc_googletest(
     name = "configuration_space_collision_free_region_test",
     timeout="long",
     deps = [
         ":configuration_space_collision_free_region",
         ":rational_forward_kinematics_test_utilities",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:symbolic_test_util",
+        "//multibody/inverse_kinematics",
+    ],
+)
+
+drake_cc_googletest(
+    name = "cspace_free_region_test",
+    timeout="long",
+    deps = [
+        ":cspace_free_region",
+        ":rational_forward_kinematics_test_utilities2",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:symbolic_test_util",
         "//multibody/inverse_kinematics",
