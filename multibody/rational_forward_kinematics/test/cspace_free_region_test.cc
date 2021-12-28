@@ -317,5 +317,170 @@ TEST_F(IiwaCspaceTest, GenerateLinkOnOneSideOfPlaneRationals) {
   TestGenerateLinkOnOneSideOfPlaneRationals(dut2, q_star,
                                             filtered_collision_pairs);
 }
+
+// Check p has degree at most 2 for each variable in t.
+void CheckPolynomialDegree2(const symbolic::Polynomial& p,
+                            const symbolic::Variables& t) {
+  for (const auto& var : t) {
+    EXPECT_LE(p.Degree(var), 2);
+  }
+}
+
+TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
+  const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
+                             {obstacles_[0].get(), obstacles_[1].get()},
+                             SeparatingPlaneOrder::kAffine,
+                             CspaceRegionType::kGenericPolytope);
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+  const Eigen::VectorXd q_star = Eigen::VectorXd::Zero(7);
+
+  // I will build a small C-space polytope C*t<=d around q_not_in_collision;
+  const Eigen::VectorXd q_not_in_collision =
+      (Eigen::VectorXd(7) << 0.5, 0.3, -0.3, 0.1, 0.4, 0.2, 0.1).finished();
+  plant.SetPositions(context.get(), q_not_in_collision);
+  ASSERT_FALSE(dut.IsPostureInCollision(*context));
+
+  // First generate a region C * t <= d.
+  Eigen::Matrix<double, 24, 7> C;
+  Eigen::Matrix<double, 24, 1> d;
+  // I create matrix C with arbitrary values, such that C * t is a small
+  // polytope surrounding q_not_in_collision.
+  // clang-format off
+  C << 1, 0, 0, 0, 2, 0, 0,
+       -1, 0, 0, 0, 0, 1, 0,
+       0, 1, 1, 0, 0, 0, 1,
+       0, -1, -2, 0, 0, -1, 0,
+       1, 1, 0, 2, 0, 0, 1,
+       1, 0, 2, -1, 0, 1, 0,
+       0, -1, 2, -2, 1, 3, 2,
+       0, 1, -2, 1, 2, 4, 3,
+       0, 3, -2, 2, 0, 1, -1,
+       1, 0, 3, 2, 0, -1, 1,
+       0, 1, -1, -2, 3, -2, 1,
+       1, 0, -1, 1, 3, 2, 0,
+       -1, -0.1, -0.2, 0, 0.3, 0.1, 0.1,
+       -2, 0.1, 0.2, 0.2, -0.3, -0.1, 0.1,
+       -1, 1, 1, 0, -1, 1, 0,
+       0, 0.2, 0.1, 0, -1, 0.1, 0,
+       0.1, 2, 0.2, 0.1, -0.1, -0.2, 0.1,
+       -0.1, -2, 0.1, 0.2, -0.15, -0.1, -0.1,
+       0.3, 0.5, 0.1, 0.7, -0.4, 1.2, 3.1,
+       -0.5, 0.3, 0.2, -0.5, 1.2, 0.7, -0.5,
+       0.4, 0.6, 1.2, -0.3, -0.5, 1.2, -0.1,
+       1.5, -0.1, 0.6, 1.5, 0.4, 2.1, 0.3,
+       0.5, 1.5, 0.3, 0.2, 1.5, -0.1, 0.5,
+       0.5, 0.2, -0.1, 1.2, -0.3, 1.1, -0.4;
+
+  // clang-format on
+  // Now I take some samples of t slightly away from q_not_in_collision. C * t
+  // <= d contains all these samples.
+  Eigen::Matrix<double, 7, 6> t_samples;
+  t_samples.col(0) = ((q_not_in_collision - q_star) / 2).array().tan();
+  t_samples.col(1) =
+      t_samples.col(0) +
+      (Eigen::VectorXd(7) << 0.11, -0.02, 0.03, 0.01, 0, 0.02, 0.02).finished();
+  t_samples.col(2) = t_samples.col(0) + (Eigen::VectorXd(7) << -0.005, 0.01,
+                                         -0.02, 0.01, 0.005, 0.01, -0.02)
+                                            .finished();
+  t_samples.col(3) = t_samples.col(0) + (Eigen::VectorXd(7) << 0.02, -0.13,
+                                         0.01, 0.02, -0.03, 0.01, 0.15)
+                                            .finished();
+  t_samples.col(4) = t_samples.col(0) + (Eigen::VectorXd(7) << 0.01, -0.04,
+                                         0.003, 0.01, -0.01, -0.11, -0.08)
+                                            .finished();
+  t_samples.col(5) = t_samples.col(0) + (Eigen::VectorXd(7) << -0.01, -0.02,
+                                         0.013, -0.02, 0.03, -0.03, -0.1)
+                                            .finished();
+  d = (C * t_samples).rowwise().maxCoeff();
+
+  CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
+  auto clock_start = std::chrono::system_clock::now();
+  const auto rationals = dut.GenerateLinkOnOneSideOfPlaneRationals(
+      q_star, filtered_collision_pairs);
+  auto ret = dut.ConstructProgramForCspacePolytope(q_star, rationals, C, d,
+                                                   filtered_collision_pairs);
+  auto clock_now = std::chrono::system_clock::now();
+  std::cout << "Elapsed Time: "
+            << static_cast<float>(
+                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                       clock_now - clock_start)
+                       .count()) /
+                   1000
+            << "s\n";
+  // First make sure that the lagrangians and verified polynomial has the right
+  // size.
+  EXPECT_EQ(ret.polytope_lagrangians.size(), rationals.size());
+  EXPECT_EQ(ret.t_lower_lagrangians.size(), rationals.size());
+  EXPECT_EQ(ret.t_upper_lagrangians.size(), rationals.size());
+  EXPECT_EQ(ret.verified_polynomials.size(), rationals.size());
+  const auto& t = dut.rational_forward_kinematics().t();
+  const symbolic::Variables t_variables{t};
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    EXPECT_EQ(ret.polytope_lagrangians[i].rows(), C.rows());
+    EXPECT_EQ(ret.t_lower_lagrangians[i].rows(), t.rows());
+    EXPECT_EQ(ret.t_upper_lagrangians[i].rows(), t.rows());
+
+    for (int j = 0; j < ret.polytope_lagrangians[i].rows(); ++j) {
+      CheckPolynomialDegree2(ret.polytope_lagrangians[i](j), t_variables);
+    }
+    for (int j = 0; j < t.rows(); ++j) {
+      CheckPolynomialDegree2(ret.t_lower_lagrangians[i](j), t_variables);
+      CheckPolynomialDegree2(ret.t_upper_lagrangians[i](j), t_variables);
+    }
+  }
+  // Make sure that each term in verified_polynomial has at most degree 3 for
+  // each t, and at most one t has degree 3.
+  for (const auto& verified_poly : ret.verified_polynomials) {
+    for (const auto& [monomial, coeff] :
+         verified_poly.monomial_to_coefficient_map()) {
+      int degree_3_count = 0;
+      for (int i = 0; i < dut.rational_forward_kinematics().t().rows(); ++i) {
+        const int t_degree =
+            monomial.degree(dut.rational_forward_kinematics().t()(i));
+        EXPECT_LE(t_degree, 3);
+        if (t_degree == 3) {
+          degree_3_count++;
+        }
+      }
+      EXPECT_LE(degree_3_count, 1);
+    }
+  }
+  // TODO(hongkai.dai): test that t_lower_lagrangians and t_upper_lagrangians
+  // are 0 since the bounds from the joint limits are redundant for this C * t
+  // <= d.
+  // Now check if ret.verified_polynomials is correct
+  VectorX<symbolic::Polynomial> d_minus_Ct(d.rows());
+  for (int i = 0; i < d_minus_Ct.rows(); ++i) {
+    d_minus_Ct(i) = symbolic::Polynomial(
+        d(i) - C.row(i).dot(dut.rational_forward_kinematics().t()),
+        t_variables);
+  }
+  VectorX<symbolic::Polynomial> t_minus_t_lower(t.rows());
+  VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
+  Eigen::VectorXd t_lower, t_upper;
+  ComputeBoundsOnT(q_star, plant.GetPositionLowerLimits(),
+                   plant.GetPositionUpperLimits(), &t_lower, &t_upper);
+  for (int i = 0; i < t.rows(); ++i) {
+    t_minus_t_lower(i) = symbolic::Polynomial(t(i) - t_lower(i), t_variables);
+    t_upper_minus_t(i) = symbolic::Polynomial(t_upper(i) - t(i), t_variables);
+  }
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    symbolic::Polynomial eval_expected = rationals[i].rational.numerator();
+    for (int j = 0; j < C.rows(); ++j) {
+      eval_expected -= ret.polytope_lagrangians[i](j) * d_minus_Ct(j);
+    }
+    for (int j = 0; j < t.rows(); ++j) {
+      eval_expected -= ret.t_lower_lagrangians[i](j) * t_minus_t_lower(j) +
+                       ret.t_upper_lagrangians[i](j) * t_upper_minus_t(j);
+    }
+    const symbolic::Polynomial eval = ret.verified_polynomials[i];
+    EXPECT_TRUE(eval.CoefficientsAlmostEqual(eval_expected, 1E-10));
+  }
+  solvers::SolverOptions solver_options;
+  solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
+  const auto result = solvers::Solve(*(ret.prog), std::nullopt, solver_options);
+  EXPECT_TRUE(result.is_success());
+}
 }  // namespace multibody
 }  // namespace drake

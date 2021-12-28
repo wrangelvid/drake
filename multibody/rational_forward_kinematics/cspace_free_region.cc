@@ -1,11 +1,16 @@
 #include "drake/multibody/rational_forward_kinematics/cspace_free_region.h"
 
+#include <limits>
+
 #include <fmt/format.h>
 
+#include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
+#include "drake/solvers/solve.h"
 
 namespace drake {
 namespace multibody {
+const double kInf = std::numeric_limits<double>::infinity();
 
 namespace {
 struct DirectedKinematicsChain {
@@ -25,6 +30,68 @@ struct DirectedKinematicsChainHash {
     return p.start * 100 + p.end;
   }
 };
+
+// map the kinematics chain to monomial_basis.
+// If the separating plane has affine order, then the polynomial we want to
+// verify (in the numerator of 1 - aᵀ(x−c) or aᵀ(x−c)-1) only contains the
+// monomials tⱼ * ∏(tᵢ, dᵢ), where tᵢ is a t on the "half chain" from the
+// expressed frame to either the link or the obstacle, and dᵢ<=2. Namely at
+// most one variable has degree 3, all the other variables have degree <= 2.
+// If the separating plane has constant order, then the polynomial we want to
+// verify only contains the monomials ∏(tᵢ, dᵢ) with dᵢ<=2. In both cases, the
+// monomial basis for the SOS polynomial contains all monomials that each
+// variable has degree at most 1, and each variable is on the "half chain" from
+// the expressed body to this link (either the robot link or the obstacle).
+void FindMonomialBasisForPolytopicRegion(
+    const RationalForwardKinematics& rational_forward_kinematics,
+    const LinkVertexOnPlaneSideRational& rational,
+    std::unordered_map<SortedPair<multibody::BodyIndex>,
+                       VectorX<drake::symbolic::Monomial>>*
+        map_chain_to_monomial_basis,
+    VectorX<drake::symbolic::Monomial>* monomial_basis_halfchain) {
+  // First check if the monomial basis for this kinematics chain has been
+  // computed.
+  const SortedPair<multibody::BodyIndex> kinematics_chain(
+      rational.link_polytope->body_index(), rational.expressed_body_index);
+  const auto it = map_chain_to_monomial_basis->find(kinematics_chain);
+  if (it == map_chain_to_monomial_basis->end()) {
+    const auto t_halfchain = rational_forward_kinematics.FindTOnPath(
+        rational.link_polytope->body_index(), rational.expressed_body_index);
+    *monomial_basis_halfchain = GenerateMonomialBasisWithOrderUpToOne(
+        drake::symbolic::Variables(t_halfchain));
+    map_chain_to_monomial_basis->emplace_hint(
+        it, std::make_pair(kinematics_chain, *monomial_basis_halfchain));
+  } else {
+    *monomial_basis_halfchain = it->second;
+  }
+}
+
+/**
+ * For a polyhedron C * x <= d, find the lower and upper bound for x(i).
+ */
+void BoundPolyhedronByBox(const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
+                          Eigen::VectorXd* x_lower, Eigen::VectorXd* x_upper) {
+  solvers::MathematicalProgram prog;
+  const auto x = prog.NewContinuousVariables(C.cols());
+  prog.AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf), d, x);
+  Eigen::VectorXd cost_coeff = Eigen::VectorXd::Zero(x.rows());
+  auto cost = prog.AddLinearCost(cost_coeff, x);
+  x_lower->resize(x.rows());
+  x_upper->resize(x.rows());
+  for (int i = 0; i < x.rows(); ++i) {
+    // Compute x_lower(i).
+    cost_coeff.setZero();
+    cost_coeff(i) = 1;
+    cost.evaluator()->UpdateCoefficients(cost_coeff);
+    auto result = solvers::Solve(prog);
+    (*x_lower)(i) = result.get_optimal_cost();
+    // Compute x_upper(i).
+    cost_coeff(i) = -1;
+    cost.evaluator()->UpdateCoefficients(cost_coeff);
+    result = solvers::Solve(prog);
+    (*x_upper)(i) = -result.get_optimal_cost();
+  }
+}
 }  // namespace
 
 CspaceFreeRegion::CspaceFreeRegion(
@@ -209,6 +276,225 @@ CspaceFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
   return rationals;
 }
 
+namespace {
+// Given t[i], t_lower and t_upper, construct the polynomial t - t_lower and
+// t_upper - t.
+void ConstructTBoundsPolynomial(
+    const std::vector<symbolic::Monomial>& t_monomial,
+    const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+    const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+    VectorX<symbolic::Polynomial>* t_minus_t_lower,
+    VectorX<symbolic::Polynomial>* t_upper_minus_t) {
+  const symbolic::Monomial monomial_one{};
+  t_minus_t_lower->resize(t_monomial.size());
+  t_upper_minus_t->resize(t_monomial.size());
+  for (int i = 0; i < static_cast<int>(t_monomial.size()); ++i) {
+    const symbolic::Polynomial::MapType map_lower{
+        {{t_monomial[i], 1}, {monomial_one, -t_lower(i)}}};
+    (*t_minus_t_lower)(i) = symbolic::Polynomial(map_lower);
+    const symbolic::Polynomial::MapType map_upper{
+        {{t_monomial[i], -1}, {monomial_one, t_upper(i)}}};
+    (*t_upper_minus_t)(i) = symbolic::Polynomial(map_upper);
+  }
+}
+
+/**
+ * Impose the constraint
+ * l_polytope(t) >= 0
+ * l_lower(t)>=0
+ * l_upper(t)>=0
+ * p(t) - l_polytope(t)ᵀ(d - C*t) - l_lower(t)ᵀ(t-t_lower) -
+ * l_upper(t)ᵀ(t_upper-t) >=0
+ * where l_polytope, l_lower, l_upper are Lagrangian
+ * multipliers. p(t) is the numerator of polytope_on_one_side_rational
+ * @param monomial_basis The monomial basis for all non-negative polynomials
+ * above.
+ * @param t_lower_needs_lagrangian If t_lower_needs_lagrangian[i]=false, then
+ * lagrangian_lower(i) = 0
+ * @param t_upper_needs_lagrangian If t_upper_needs_lagrangian[i]=false, then
+ * lagrangian_upper(i) = 0
+ * @param[out] lagrangian_polytope l_polytope(t).
+ * @param[out] lagrangian_lower l_lower(t).
+ * @param[out] lagrangian_upper l_upper(t).
+ * @param[out] verified_polynomial p(t) - l_polytope(t)ᵀ(d - C*t) -
+ * l_lower(t)ᵀ(t-t_lower) - l_upper(t)ᵀ(t_upper-t)
+ */
+void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
+    solvers::MathematicalProgram* prog,
+    const symbolic::RationalFunction& polytope_on_one_side_rational,
+    const VectorX<symbolic::Polynomial>& d_minus_Ct,
+    const VectorX<symbolic::Polynomial>& t_minus_t_lower,
+    const VectorX<symbolic::Polynomial>& t_upper_minus_t,
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const VerificationOption& verification_option,
+    const std::vector<bool>& t_lower_needs_lagrangian,
+    const std::vector<bool>& t_upper_needs_lagrangian,
+    VectorX<symbolic::Polynomial>* lagrangian_polytope,
+    VectorX<symbolic::Polynomial>* lagrangian_lower,
+    VectorX<symbolic::Polynomial>* lagrangian_upper,
+    symbolic::Polynomial* verified_polynomial) {
+  lagrangian_polytope->resize(d_minus_Ct.rows());
+  lagrangian_lower->resize(t_minus_t_lower.rows());
+  lagrangian_upper->resize(t_upper_minus_t.rows());
+  *verified_polynomial = polytope_on_one_side_rational.numerator();
+  for (int i = 0; i < d_minus_Ct.rows(); ++i) {
+    (*lagrangian_polytope)(i) =
+        prog->NewNonnegativePolynomial(monomial_basis,
+                                       verification_option.lagrangian_type)
+            .first;
+    *verified_polynomial -= (*lagrangian_polytope)(i)*d_minus_Ct(i);
+  }
+  for (int i = 0; i < t_minus_t_lower.rows(); ++i) {
+    if (t_lower_needs_lagrangian[i]) {
+      (*lagrangian_lower)(i) =
+          prog->NewNonnegativePolynomial(monomial_basis,
+                                         verification_option.lagrangian_type)
+              .first;
+      *verified_polynomial -= (*lagrangian_lower)(i)*t_minus_t_lower(i);
+    } else {
+      (*lagrangian_lower)(i) = symbolic::Polynomial();
+    }
+  }
+  for (int i = 0; i < t_upper_minus_t.rows(); ++i) {
+    if (t_upper_needs_lagrangian[i]) {
+      (*lagrangian_upper)(i) =
+          prog->NewNonnegativePolynomial(monomial_basis,
+                                         verification_option.lagrangian_type)
+              .first;
+      *verified_polynomial -= (*lagrangian_upper)(i)*t_upper_minus_t(i);
+    } else {
+      (*lagrangian_upper)(i) = symbolic::Polynomial();
+    }
+  }
+
+  const symbolic::Polynomial verified_polynomial_expected =
+      prog->NewNonnegativePolynomial(monomial_basis,
+                                     verification_option.link_polynomial_type)
+          .first;
+  const symbolic::Polynomial poly_diff{*verified_polynomial -
+                                       verified_polynomial_expected};
+  for (const auto& term : poly_diff.monomial_to_coefficient_map()) {
+    prog->AddLinearEqualityConstraint(term.second, 0);
+  }
+}
+}  // namespace
+
+CspaceFreeRegion::CspacePolytopeProgramReturn
+CspaceFreeRegion::ConstructProgramForCspacePolytope(
+    const Eigen::Ref<const Eigen::VectorXd>& q_star,
+    const std::vector<LinkVertexOnPlaneSideRational>& rationals,
+    const Eigen::Ref<const Eigen::MatrixXd>& C,
+    const Eigen::Ref<const Eigen::VectorXd>& d,
+    const FilteredCollisionPairs& filtered_collision_pairs,
+    const VerificationOption& verification_option) const {
+  DRAKE_DEMAND(cspace_region_type_ == CspaceRegionType::kGenericPolytope);
+  CspaceFreeRegion::CspacePolytopeProgramReturn ret(rationals.size());
+  // Add t as indeterminates
+  const auto& t = rational_forward_kinematics_.t();
+  ret.prog->AddIndeterminates(t);
+  // Add separating planes as decision variables.
+  for (const auto& separating_plane : separating_planes_) {
+    if (!IsGeometryPairCollisionIgnored(
+            separating_plane.positive_side_polytope->get_id(),
+            separating_plane.negative_side_polytope->get_id(),
+            filtered_collision_pairs)) {
+      ret.prog->AddDecisionVariables(separating_plane.decision_variables);
+    }
+  }
+  // Now build the polynomials d(i) - C.row(i) * t
+  DRAKE_DEMAND(C.rows() == d.rows() && C.cols() == t.rows());
+  VectorX<symbolic::Polynomial> d_minus_Ct_polynomial(C.rows());
+  std::vector<symbolic::Monomial> t_monomials;
+  t_monomials.reserve(t.rows());
+  for (int i = 0; i < t.rows(); ++i) {
+    t_monomials.emplace_back(t(i));
+  }
+  const symbolic::Monomial monomial_one{};
+  symbolic::Polynomial::MapType d_minus_Ct_poly_map;
+  for (int i = 0; i < C.rows(); ++i) {
+    for (int j = 0; j < t.rows(); ++j) {
+      auto it = d_minus_Ct_poly_map.find(t_monomials[j]);
+      if (it == d_minus_Ct_poly_map.end()) {
+        d_minus_Ct_poly_map.emplace_hint(it, t_monomials[j], -C(i, j));
+      } else {
+        it->second = -C(i, j);
+      }
+    }
+    auto it = d_minus_Ct_poly_map.find(monomial_one);
+    if (it == d_minus_Ct_poly_map.end()) {
+      d_minus_Ct_poly_map.emplace_hint(it, monomial_one, d(i));
+    } else {
+      it->second = d(i);
+    }
+    d_minus_Ct_polynomial(i) = symbolic::Polynomial(d_minus_Ct_poly_map);
+  }
+
+  // Build the polynomial for t-t_lower and t_upper-t
+  Eigen::VectorXd t_lower, t_upper;
+  ComputeBoundsOnT(
+      q_star, rational_forward_kinematics_.plant().GetPositionLowerLimits(),
+      rational_forward_kinematics_.plant().GetPositionUpperLimits(), &t_lower,
+      &t_upper);
+  // If C * t <= d already implies t(i) <= t_upper(i) or t(i) >= t_lower(i) for
+  // some t, then we don't need to add the lagrangian multiplier for that
+  // t_upper(i) - t(i) or t(i) - t_lower(i).
+  Eigen::VectorXd t_lower_from_polytope, t_upper_from_polytope;
+  BoundPolyhedronByBox(C, d, &t_lower_from_polytope, &t_upper_from_polytope);
+  std::vector<bool> t_lower_needs_lagrangian(t.rows(), true);
+  std::vector<bool> t_upper_needs_lagrangian(t.rows(), true);
+  for (int i = 0; i < t.rows(); ++i) {
+    if (t_lower(i) < t_lower_from_polytope(i)) {
+      t_lower_needs_lagrangian[i] = false;
+    }
+    if (t_upper(i) > t_upper_from_polytope(i)) {
+      t_upper_needs_lagrangian[i] = false;
+    }
+  }
+  VectorX<symbolic::Polynomial> t_minus_t_lower_poly(t.rows());
+  VectorX<symbolic::Polynomial> t_upper_minus_t_poly(t.rows());
+  ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper,
+                             &t_minus_t_lower_poly, &t_upper_minus_t_poly);
+
+  // Get the monomial basis for each kinematics chain.
+  std::unordered_map<SortedPair<multibody::BodyIndex>,
+                     VectorX<symbolic::Monomial>>
+      map_chain_to_monomial_basis;
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    VectorX<symbolic::Monomial> monomial_basis_chain;
+    FindMonomialBasisForPolytopicRegion(
+        rational_forward_kinematics_, rationals[i],
+        &map_chain_to_monomial_basis, &monomial_basis_chain);
+    // Now add the constraint that C*t<=d and t_lower <= t <= t_upper implies
+    // the rational being nonnegative.
+    AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
+        ret.prog.get(), rationals[i].rational, d_minus_Ct_polynomial,
+        t_minus_t_lower_poly, t_upper_minus_t_poly, monomial_basis_chain,
+        verification_option, t_lower_needs_lagrangian, t_upper_needs_lagrangian,
+        &(ret.polytope_lagrangians[i]), &(ret.t_lower_lagrangians[i]),
+        &(ret.t_upper_lagrangians[i]), &(ret.verified_polynomials[i]));
+  }
+  return ret;
+}
+
+bool CspaceFreeRegion::IsPostureInCollision(
+    const systems::Context<double>& context) const {
+  const auto& plant = rational_forward_kinematics_.plant();
+  drake::math::RigidTransform<double> X_WW;
+  X_WW.SetIdentity();
+  for (const auto& link_and_polytopes : link_polytopes_) {
+    const drake::math::RigidTransform<double> X_WB = plant.EvalBodyPoseInWorld(
+        context, plant.get_body(link_and_polytopes.first));
+    for (const auto& link_polytope : link_and_polytopes.second) {
+      for (const auto& obstacle : obstacles_) {
+        if (link_polytope->IsInCollision(*obstacle, X_WB, X_WW)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 std::vector<LinkVertexOnPlaneSideRational>
 GenerateLinkOnOneSideOfPlaneRationalFunction(
     const RationalForwardKinematics& rational_forward_kinematics,
@@ -261,6 +547,18 @@ bool IsGeometryPairCollisionIgnored(
   return IsGeometryPairCollisionIgnored(
       drake::SortedPair<ConvexGeometry::Id>(id1, id2),
       filtered_collision_pairs);
+}
+
+void ComputeBoundsOnT(const Eigen::Ref<const Eigen::VectorXd>& q_star,
+                      const Eigen::Ref<const Eigen::VectorXd>& q_lower,
+                      const Eigen::Ref<const Eigen::VectorXd>& q_upper,
+                      Eigen::VectorXd* t_lower, Eigen::VectorXd* t_upper) {
+  DRAKE_DEMAND((q_upper.array() >= q_lower.array()).all());
+  // Currently I require that q_upper - q_star < pi and q_star - q_lower > -pi.
+  DRAKE_DEMAND(((q_upper - q_star).array() < M_PI).all());
+  DRAKE_DEMAND(((q_star - q_lower).array() > -M_PI).all());
+  *t_lower = ((q_lower - q_star) / 2).array().tan();
+  *t_upper = ((q_upper - q_star) / 2).array().tan();
 }
 
 }  // namespace multibody

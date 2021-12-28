@@ -152,6 +152,44 @@ class CspaceFreeRegion {
       const CspaceFreeRegion::FilteredCollisionPairs& filtered_collision_pairs)
       const;
 
+  /**
+   * This struct is the return type of ConstructProgramForCspacePolytope, to
+   * verify the C-space region C * t <= d is collision free.
+   */
+  struct CspacePolytopeProgramReturn {
+    CspacePolytopeProgramReturn(size_t rationals_size)
+        : prog{new solvers::MathematicalProgram()},
+          polytope_lagrangians{rationals_size},
+          t_lower_lagrangians{rationals_size},
+          t_upper_lagrangians{rationals_size},
+          verified_polynomials{rationals_size} {}
+
+    std::unique_ptr<solvers::MathematicalProgram> prog;
+    // polytope_lagrangians has size rationals.size(), namely it is the number
+    // of (link_polytope, obstacle_polytope) pairs. lagrangians[i] has size
+    // C.rows()
+    std::vector<VectorX<symbolic::Polynomial>> polytope_lagrangians;
+    // t_lower_lagrangians[i][j] is the lagrangian for t(j) >= t_lower(j) to
+    // verify rationals[i]>= 0.
+    std::vector<VectorX<symbolic::Polynomial>> t_lower_lagrangians;
+    // t_upper_lagrangians[i][j] is the lagrangian for t(j) <= t_lower(j) to
+    // verify rationals[i]>= 0.
+    std::vector<VectorX<symbolic::Polynomial>> t_upper_lagrangians;
+    // verified_polynomial[i] is p(t) - l_polytope(t)ᵀ(d - C*t) -
+    // l_lower(t)ᵀ(t-t_lower) - l_upper(t)ᵀ(t_upper-t)
+    std::vector<symbolic::Polynomial> verified_polynomials;
+  };
+
+  CspacePolytopeProgramReturn ConstructProgramForCspacePolytope(
+      const Eigen::Ref<const Eigen::VectorXd>& q_star,
+      const std::vector<LinkVertexOnPlaneSideRational>& rationals,
+      const Eigen::Ref<const Eigen::MatrixXd>& C,
+      const Eigen::Ref<const Eigen::VectorXd>& d,
+      const FilteredCollisionPairs& filtered_collision_pairs,
+      const VerificationOption& verification_option = {}) const;
+
+  bool IsPostureInCollision(const systems::Context<double>& context) const;
+
   const RationalForwardKinematics& rational_forward_kinematics() const {
     return rational_forward_kinematics_;
   }
@@ -213,5 +251,9 @@ bool IsGeometryPairCollisionIgnored(
     const SortedPair<ConvexGeometry::Id>& geometry_pair,
     const CspaceFreeRegion::FilteredCollisionPairs& filtered_collision_pairs);
 
+void ComputeBoundsOnT(const Eigen::Ref<const Eigen::VectorXd>& q_star,
+                      const Eigen::Ref<const Eigen::VectorXd>& q_upper,
+                      const Eigen::Ref<const Eigen::VectorXd>& q_lower,
+                      Eigen::VectorXd* t_lower, Eigen::VectorXd* t_upper);
 }  // namespace multibody
 }  // namespace drake
