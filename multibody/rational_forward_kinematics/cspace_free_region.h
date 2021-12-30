@@ -190,6 +190,109 @@ class CspaceFreeRegion {
 
   bool IsPostureInCollision(const systems::Context<double>& context) const;
 
+  /** Each tuple corresponds to one rational aᵀx + b - 1 or -1 - aᵀx - b.
+   * This tuple should be used with GenerateTupleForBilinearAlternation. To save
+   * computation time, this class minimizes using dynamic memory allocation.
+   */
+  struct CspacePolytopeTuple {
+    CspacePolytopeTuple(symbolic::Polynomial m_rational_numerator,
+                        std::vector<int> m_polytope_lagrangian_gram_lower_start,
+                        std::vector<int> m_t_lower_lagrangian_gram_lower_start,
+                        std::vector<int> m_t_upper_lagrangian_gram_lower_start,
+                        int m_verified_polynomial_gram_lower_start,
+                        VectorX<symbolic::Monomial> m_monomial_basis)
+        : rational_numerator{std::move(m_rational_numerator)},
+          polytope_lagrangian_gram_lower_start{
+              std::move(m_polytope_lagrangian_gram_lower_start)},
+          t_lower_lagrangian_gram_lower_start{
+              std::move(m_t_lower_lagrangian_gram_lower_start)},
+          t_upper_lagrangian_gram_lower_start{
+              std::move(m_t_upper_lagrangian_gram_lower_start)},
+          verified_polynomial_gram_lower_start{
+              m_verified_polynomial_gram_lower_start},
+          monomial_basis{std::move(m_monomial_basis)} {}
+
+    // This is the numerator of the rational
+    // aᵀx+b-1 or -1-aᵀx-b
+    symbolic::Polynomial rational_numerator;
+    // lagrangian_gram_var.segment(polytope_lagrangian_gram_lower_start,
+    // n(n+1)/2) is the low diagonal entries of the gram matrix in
+    // l_polytope(t)(i). l_polytope(t) will multiply with (d-C*t).
+    std::vector<int> polytope_lagrangian_gram_lower_start;
+    // lagrangian_gram_vars.segment(t_lower_lagrangian_gram_start_index[i],
+    // n(n+1)/2) is the lower diagonal entries of the gram matrix in
+    // l_lower(t)(i). l_lower(t) will multiply with (t - t_lower).
+    std::vector<int> t_lower_lagrangian_gram_lower_start;
+    // lagrangian_gram_vars.segment(t_upper_lagrangian_gram_start_index[i],
+    // n(n+1)/2) is the lower diagonal entries of the gram matrix in
+    // l_upper(t)(i). l_upper(t) will multiply with (t_upper - t).
+    std::vector<int> t_upper_lagrangian_gram_lower_start;
+    // Verified polynomial is p(t) - l_polytope(t)ᵀ(d-C*t) -
+    // l_lower(t)ᵀ(t-t_lower) - l_upper(t)ᵀ(t_upper-t)
+    // verified_gram_vars.segment(verified_polynomial_gram_lower_start[i],
+    // n(n+1)/2) is the lower part of the gram matrix of the verified
+    // polynomial.
+    int verified_polynomial_gram_lower_start;
+    VectorX<symbolic::Monomial> monomial_basis;
+  };
+
+  /** Generate the tuples for bilinear alternation.
+   * @param[out] d_minus_Ct Both C and d are decision variables in d_minus_Ct
+   * (instead of fixed double values).
+   * @param[out] lagrangian_gram_vars All of the variables in the Gram matrices
+   * for all Lagrangian polynomials.
+   * @param[out] verified_gram_vars All of the variables in the verified
+   * polynomial p(t) - l_polytope(t)ᵀ(d-C*t) - l_lower(t)ᵀ(t-t_lower) -
+   * l_upper(t)ᵀ(t_upper-t) for all of the rationals.
+   * @param[out] separating_plane_vars All of the variables in the separating
+   * plane aᵀx + b = 0.
+   */
+  void GenerateTuplesForBilinearAlternation(
+      const Eigen::Ref<const Eigen::VectorXd>& q_star,
+      const FilteredCollisionPairs& filtered_collision_pairs, int C_rows,
+      std::vector<CspacePolytopeTuple>* alternation_tuples,
+      VectorX<symbolic::Polynomial>* d_minus_Ct, MatrixX<symbolic::Variable>* C,
+      VectorX<symbolic::Variable>* d,
+      VectorX<symbolic::Variable>* lagrangian_gram_vars,
+      VectorX<symbolic::Variable>* verified_gram_vars,
+      VectorX<symbolic::Variable>* separating_plane_vars) const;
+
+  /**
+   * Given the C-space free region candidate C*t<=d,
+   * construct an optimization program with the constraint
+   * p(t) - l_polytope(t).dot(d - C*t) - l_lower(t).dot(t - t_lower) -
+   * l_upper(t).dot(t_upper-t) >= 0 l_polytope(t)>=0, l_lower(t)>=0,
+   * l_upper(t)>=0 P is psd |cᵢᵀP|₂ ≤ dᵢ−cᵢᵀq The unknowns are the separating
+   * plane parameters (a, b), the lagrangian multipliers l_polytope(t),
+   * l_lower(t), l_upper(t), the inscribed ellipsoid parameter P, q
+   * @param alternation_tuples computed from
+   * GenerateTuplesForBilinearAlternation.
+   * @param lagrangian_gram_vars computed from
+   * GenerateTuplesForBilinearAlternation.
+   * @param verified_gram_vars computed from
+   * GenerateTuplesForBilinearAlternation.
+   * @param separating_plane_vars computed from
+   * GenerateTuplesForBilinearAlternation.
+   * @param t_lower The lower bounds of t computed from joint limits.
+   * @param t_upper The upper bounds of t computed from joint limits.
+   * @param[out] P The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
+   * 1}. Set P=nullptr if you don't want the inscribed ellipsoid.
+   * @param[out] q The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
+   * 1}. Set q=nullptr if you don't want the inscribed ellipsoid.
+   * @note The constructed program doesn't have a cost yet.
+   */
+  std::unique_ptr<solvers::MathematicalProgram> ConstructLagrangianProgram(
+      const std::vector<CspacePolytopeTuple>& alternation_tuples,
+      const Eigen::Ref<const Eigen::MatrixXd>& C,
+      const Eigen::Ref<const Eigen::VectorXd>& d,
+      const VectorX<symbolic::Variable>& lagrangian_gram_vars,
+      const VectorX<symbolic::Variable>& verified_gram_vars,
+      const VectorX<symbolic::Variable>& separating_plane_vars,
+      const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+      const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+      const VerificationOption& option, MatrixX<symbolic::Variable>* P,
+      VectorX<symbolic::Variable>* q) const;
+
   const RationalForwardKinematics& rational_forward_kinematics() const {
     return rational_forward_kinematics_;
   }
@@ -255,5 +358,83 @@ void ComputeBoundsOnT(const Eigen::Ref<const Eigen::VectorXd>& q_star,
                       const Eigen::Ref<const Eigen::VectorXd>& q_upper,
                       const Eigen::Ref<const Eigen::VectorXd>& q_lower,
                       Eigen::VectorXd* t_lower, Eigen::VectorXd* t_upper);
+
+/**
+ * Construct the polynomial mᵀQm from monomial basis m and the lower diagonal
+ * part of Q.
+ * @param monomial_basis m in the documentation above.
+ * @param gram Q in the documentation above.
+ */
+template <typename T>
+symbolic::Polynomial CalcPolynomialFromGram(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const MatrixX<T>>& gram);
+
+/**
+ * Overloads CalcPolynomialFromGram. It first evaluates each entry of gram
+ * from `result`. This function avoids dynamic memory allocation of the gram
+ * matrix result.
+ */
+symbolic::Polynomial CalcPolynomialFromGram(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& gram,
+    const solvers::MathematicalProgramResult& result);
+
+/**
+ * Construct the polynomial mᵀQm from monomial basis m and the lower diagonal
+ * part of Q.
+ * @param monomial_basis m in the documentation above.
+ * @param gram_lower stacking the columns of Q's lower part.
+ */
+template <typename T>
+symbolic::Polynomial CalcPolynomialFromGramLower(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const VectorX<T>>& gram_lower);
+
+/**
+ * Overload CalcPolynomialFromGramLower, but the value of gram matrix Q is
+ * obtained from result. This function avoids dynamically allocate the matrix
+ * for Q's value.
+ */
+symbolic::Polynomial CalcPolynomialFromGramLower(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& gram_lower,
+    const solvers::MathematicalProgramResult& result);
+
+/**
+ * Given the lower part of a symmetric matrix, fill the whole matrix.
+ * @param lower Stacking the column of the matrix lower part.
+ */
+template <typename T>
+void SymmetricMatrixFromLower(int mat_rows,
+                              const Eigen::Ref<const VectorX<T>>& lower,
+                              MatrixX<T>* mat);
+
+/**
+ * Add the constraint that an ellipsoid {Py+q | |y|₂ <= 1} is contained in the
+ * polytope {t | C*t <= d, t_lower <= t <= t_upper}.
+ *
+ * Mathematically the constraint is
+ * |cᵢᵀP|₂ ≤ dᵢ−cᵢᵀq
+ * |P.row(i)|₂ + qᵢ ≤ t_upper(i)
+ * −|P.row(i)|₂ + qᵢ ≥ t_lower(i)
+ * P is p.s.d,
+ * @param P A symmetric matrix already registered as decision variable in
+ * `prog`.
+ * @param q Already registered as decision variable in `prog`.
+ * @param constrain_P_psd Whether we add the constraint P is psd (If you
+ * maximize log(det(P)) later, then calling
+ * prog.AddMaximizeLogDeterminantSymmetricMatrixCost(P) will automatically
+ * constraint P being psd).
+ */
+void AddInscribedEllipsoid(
+    solvers::MathematicalProgram* prog,
+    const Eigen::Ref<const Eigen::MatrixXd>& C,
+    const Eigen::Ref<const Eigen::VectorXd>& d,
+    const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+    const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& P,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& q,
+    bool constrain_P_psd = true);
 }  // namespace multibody
 }  // namespace drake

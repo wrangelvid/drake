@@ -70,6 +70,7 @@ void CheckIsAffinePolynomial(
     EXPECT_TRUE(decision_vars.find(decision_var) != decision_vars.end());
   }
 }
+
 void TestCspaceFreeRegionConstructor(
     const multibody::MultibodyPlant<double>& plant,
     const std::vector<const ConvexPolytope*>& link_polytopes,
@@ -326,14 +327,12 @@ void CheckPolynomialDegree2(const symbolic::Polynomial& p,
   }
 }
 
-TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
-  const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
-                             {obstacles_[0].get(), obstacles_[1].get()},
-                             SeparatingPlaneOrder::kAffine,
-                             CspaceRegionType::kGenericPolytope);
+void ConstructInitialCspacePolytope(const CspaceFreeRegion& dut,
+                                    Eigen::VectorXd* q_star, Eigen::MatrixXd* C,
+                                    Eigen::VectorXd* d) {
   const auto& plant = dut.rational_forward_kinematics().plant();
   auto context = plant.CreateDefaultContext();
-  const Eigen::VectorXd q_star = Eigen::VectorXd::Zero(7);
+  *q_star = Eigen::VectorXd::Zero(7);
 
   // I will build a small C-space polytope C*t<=d around q_not_in_collision;
   const Eigen::VectorXd q_not_in_collision =
@@ -342,12 +341,12 @@ TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
   ASSERT_FALSE(dut.IsPostureInCollision(*context));
 
   // First generate a region C * t <= d.
-  Eigen::Matrix<double, 24, 7> C;
-  Eigen::Matrix<double, 24, 1> d;
+  C->resize(24, 7);
+  d->resize(24);
   // I create matrix C with arbitrary values, such that C * t is a small
   // polytope surrounding q_not_in_collision.
   // clang-format off
-  C << 1, 0, 0, 0, 2, 0, 0,
+  *C << 1, 0, 0, 0, 2, 0, 0,
        -1, 0, 0, 0, 0, 1, 0,
        0, 1, 1, 0, 0, 0, 1,
        0, -1, -2, 0, 0, -1, 0,
@@ -376,7 +375,7 @@ TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
   // Now I take some samples of t slightly away from q_not_in_collision. C * t
   // <= d contains all these samples.
   Eigen::Matrix<double, 7, 6> t_samples;
-  t_samples.col(0) = ((q_not_in_collision - q_star) / 2).array().tan();
+  t_samples.col(0) = ((q_not_in_collision - *q_star) / 2).array().tan();
   t_samples.col(1) =
       t_samples.col(0) +
       (Eigen::VectorXd(7) << 0.11, -0.02, 0.03, 0.01, 0, 0.02, 0.02).finished();
@@ -392,7 +391,21 @@ TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
   t_samples.col(5) = t_samples.col(0) + (Eigen::VectorXd(7) << -0.01, -0.02,
                                          0.013, -0.02, 0.03, -0.03, -0.1)
                                             .finished();
-  d = (C * t_samples).rowwise().maxCoeff();
+  *d = ((*C) * t_samples).rowwise().maxCoeff();
+}
+
+TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
+  const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
+                             {obstacles_[0].get(), obstacles_[1].get()},
+                             SeparatingPlaneOrder::kAffine,
+                             CspaceRegionType::kGenericPolytope);
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+
+  Eigen::VectorXd q_star;
+  Eigen::MatrixXd C;
+  Eigen::VectorXd d;
+  ConstructInitialCspacePolytope(dut, &q_star, &C, &d);
 
   CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
   auto clock_start = std::chrono::system_clock::now();
@@ -481,6 +494,339 @@ TEST_F(IiwaCspaceTest, ConstructProgramForCspacePolytope) {
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
   const auto result = solvers::Solve(*(ret.prog), std::nullopt, solver_options);
   EXPECT_TRUE(result.is_success());
+}
+
+TEST_F(IiwaCspaceTest, GenerateTuplesForBilinearAlternation) {
+  const CspaceFreeRegion dut(
+      *iiwa_, {link7_polytopes_[0].get(), link5_polytopes_[0].get()},
+      {obstacles_[0].get(), obstacles_[1].get()}, SeparatingPlaneOrder::kAffine,
+      CspaceRegionType::kGenericPolytope);
+  const Eigen::VectorXd q_star = Eigen::VectorXd::Zero(7);
+  const int C_rows = 5;
+  std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
+  VectorX<symbolic::Polynomial> d_minus_Ct;
+  MatrixX<symbolic::Variable> C_var;
+  VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
+      separating_plane_vars;
+  dut.GenerateTuplesForBilinearAlternation(
+      q_star, {}, C_rows, &alternation_tuples, &d_minus_Ct, &C_var, &d_var,
+      &lagrangian_gram_vars, &verified_gram_vars, &separating_plane_vars);
+  int rational_count = 0;
+  for (const auto& separating_plane : dut.separating_planes()) {
+    rational_count += separating_plane.positive_side_polytope->p_BV().cols() +
+                      separating_plane.negative_side_polytope->p_BV().cols();
+  }
+  EXPECT_EQ(alternation_tuples.size(), rational_count);
+  // Now count the total number of lagrangian gram vars.
+  int lagrangian_gram_vars_count = 0;
+  int verified_gram_vars_count = 0;
+  std::unordered_set<int> lagrangian_gram_vars_start;
+  std::unordered_set<int> verified_gram_vars_start;
+  for (const auto& tuple : alternation_tuples) {
+    const int gram_rows = tuple.monomial_basis.rows();
+    const int gram_lower_size = gram_rows * (gram_rows + 1) / 2;
+    lagrangian_gram_vars_count +=
+        gram_lower_size *
+        (C_rows + 2 * dut.rational_forward_kinematics().t().rows());
+    verified_gram_vars_count += gram_lower_size;
+    std::copy(tuple.polytope_lagrangian_gram_lower_start.begin(),
+              tuple.polytope_lagrangian_gram_lower_start.end(),
+              std::inserter(lagrangian_gram_vars_start,
+                            lagrangian_gram_vars_start.end()));
+    std::copy(tuple.t_lower_lagrangian_gram_lower_start.begin(),
+              tuple.t_lower_lagrangian_gram_lower_start.end(),
+              std::inserter(lagrangian_gram_vars_start,
+                            lagrangian_gram_vars_start.end()));
+    std::copy(tuple.t_upper_lagrangian_gram_lower_start.begin(),
+              tuple.t_upper_lagrangian_gram_lower_start.end(),
+              std::inserter(lagrangian_gram_vars_start,
+                            lagrangian_gram_vars_start.end()));
+    verified_gram_vars_start.insert(tuple.verified_polynomial_gram_lower_start);
+  }
+  EXPECT_EQ(lagrangian_gram_vars.rows(), lagrangian_gram_vars_count);
+  EXPECT_EQ(verified_gram_vars.rows(), verified_gram_vars_count);
+  EXPECT_EQ(verified_gram_vars_start.size(), alternation_tuples.size());
+  EXPECT_EQ(lagrangian_gram_vars_start.size(),
+            alternation_tuples.size() *
+                (C_rows + 2 * dut.rational_forward_kinematics().t().rows()));
+  int separating_plane_vars_count = 0;
+  for (const auto& separating_plane : dut.separating_planes()) {
+    separating_plane_vars_count += separating_plane.decision_variables.rows();
+  }
+  EXPECT_EQ(separating_plane_vars.rows(), separating_plane_vars_count);
+  const symbolic::Variables separating_plane_vars_set{separating_plane_vars};
+  EXPECT_EQ(separating_plane_vars_set.size(), separating_plane_vars_count);
+}
+
+void CheckPsd(const Eigen::Ref<const Eigen::MatrixXd>& mat, double tol) {
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(mat);
+  ASSERT_EQ(es.info(), Eigen::Success);
+  EXPECT_TRUE((es.eigenvalues().array() > -tol).all());
+}
+
+TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
+  const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
+                             {obstacles_[0].get(), obstacles_[1].get()},
+                             SeparatingPlaneOrder::kAffine,
+                             CspaceRegionType::kGenericPolytope);
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+
+  Eigen::VectorXd q_star;
+  Eigen::MatrixXd C;
+  Eigen::VectorXd d;
+  ConstructInitialCspacePolytope(dut, &q_star, &C, &d);
+
+  CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
+  std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
+  VectorX<symbolic::Polynomial> d_minus_Ct;
+  MatrixX<symbolic::Variable> C_var;
+  VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
+      separating_plane_vars;
+  dut.GenerateTuplesForBilinearAlternation(
+      q_star, filtered_collision_pairs, C.rows(), &alternation_tuples,
+      &d_minus_Ct, &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
+      &separating_plane_vars);
+  Eigen::VectorXd t_lower, t_upper;
+  ComputeBoundsOnT(q_star, plant.GetPositionLowerLimits(),
+                   plant.GetPositionUpperLimits(), &t_lower, &t_upper);
+
+  MatrixX<symbolic::Variable> P;
+  VectorX<symbolic::Variable> q;
+  auto prog = dut.ConstructLagrangianProgram(
+      alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
+      separating_plane_vars, t_lower, t_upper, {}, &P, &q);
+  prog->AddMaximizeLogDeterminantSymmetricMatrixCost(
+      P.cast<symbolic::Expression>());
+  solvers::SolverOptions solver_options;
+  solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
+  const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+  EXPECT_TRUE(result.is_success());
+
+  const double psd_tol = 1E-6;
+  const auto P_sol = result.GetSolution(P);
+  CheckPsd(P_sol, psd_tol);
+
+  const Eigen::VectorXd lagrangian_gram_var_vals =
+      result.GetSolution(lagrangian_gram_vars);
+  const Eigen::VectorXd verified_gram_var_vals =
+      result.GetSolution(verified_gram_vars);
+  const Eigen::VectorXd separating_plane_var_vals =
+      result.GetSolution(separating_plane_vars);
+  symbolic::Environment env;
+  env.insert(separating_plane_vars, separating_plane_var_vals);
+  VectorX<symbolic::Polynomial> d_minus_Ct_poly(C.rows());
+  const auto& t = dut.rational_forward_kinematics().t();
+  for (int i = 0; i < C.rows(); ++i) {
+    d_minus_Ct_poly(i) = symbolic::Polynomial(d(i) - C.row(i).dot(t));
+  }
+  VectorX<symbolic::Polynomial> t_minus_t_lower(t.rows());
+  VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
+  for (int i = 0; i < t.rows(); ++i) {
+    t_minus_t_lower(i) = symbolic::Polynomial(t(i) - t_lower(i));
+    t_upper_minus_t(i) = symbolic::Polynomial(t_upper(i) - t(i));
+  }
+
+  // Now check if each Gram matrix is PSD.
+  for (const auto& tuple : alternation_tuples) {
+    symbolic::Polynomial verified_polynomial =
+        tuple.rational_numerator.EvaluatePartial(env);
+    const int gram_rows = tuple.monomial_basis.rows();
+    const int gram_lower_size = gram_rows * (gram_rows + 1) / 2;
+    Eigen::MatrixXd gram;
+    SymmetricMatrixFromLower<double>(
+        gram_rows,
+        verified_gram_var_vals.segment(
+            tuple.verified_polynomial_gram_lower_start, gram_lower_size),
+        &gram);
+    CheckPsd(gram, psd_tol);
+    const symbolic::Polynomial verified_polynomial_expected =
+        CalcPolynomialFromGram<double>(tuple.monomial_basis, gram);
+    for (int i = 0; i < C.rows(); ++i) {
+      SymmetricMatrixFromLower<double>(
+          gram_rows,
+          lagrangian_gram_var_vals.segment(
+              tuple.polytope_lagrangian_gram_lower_start[i], gram_lower_size),
+          &gram);
+      CheckPsd(gram, psd_tol);
+      verified_polynomial -=
+          CalcPolynomialFromGram<double>(tuple.monomial_basis, gram) *
+          d_minus_Ct_poly(i);
+    }
+    for (int i = 0; i < t.rows(); ++i) {
+      SymmetricMatrixFromLower<double>(
+          gram_rows,
+          lagrangian_gram_var_vals.segment(
+              tuple.t_lower_lagrangian_gram_lower_start[i], gram_lower_size),
+          &gram);
+      CheckPsd(gram, psd_tol);
+      verified_polynomial -=
+          CalcPolynomialFromGram<double>(tuple.monomial_basis, gram) *
+          t_minus_t_lower(i);
+
+      SymmetricMatrixFromLower<double>(
+          gram_rows,
+          lagrangian_gram_var_vals.segment(
+              tuple.t_upper_lagrangian_gram_lower_start[i], gram_lower_size),
+          &gram);
+      CheckPsd(gram, psd_tol);
+      verified_polynomial -=
+          CalcPolynomialFromGram<double>(tuple.monomial_basis, gram) *
+          t_upper_minus_t(i);
+    }
+    EXPECT_TRUE(verified_polynomial.CoefficientsAlmostEqual(
+        verified_polynomial_expected, 1E-5));
+  }
+}
+
+GTEST_TEST(CalcPolynomialFromGram, Test1) {
+  const symbolic::Variable x("x");
+  // monomial_basis = [x, x², 1]
+  const Vector3<symbolic::Monomial> monomial_basis(
+      symbolic::Monomial(x, 1), symbolic::Monomial(x, 2), symbolic::Monomial());
+  Eigen::Matrix3d Q;
+  // clang-format off
+  Q << 1, 2, 3,
+       4, 2, 5,
+       4, 1, 3;
+  // clang-format on
+  Vector6<double> Q_lower;
+  Q_lower << 1, 3, 3.5, 2, 3, 3;
+  const auto ret1 = CalcPolynomialFromGram<double>(monomial_basis, Q);
+  // ret should be 6x³ + 7x + 2x⁴ + 7x²+3
+  const symbolic::Polynomial ret_expected{{{symbolic::Monomial(x, 3), 6},
+                                           {symbolic::Monomial(x, 1), 7},
+                                           {symbolic::Monomial(x, 4), 2},
+                                           {symbolic::Monomial(x, 2), 7},
+                                           {symbolic::Monomial(), 3}}};
+  EXPECT_TRUE(ret1.EqualToAfterExpansion(ret_expected));
+
+  const auto ret2 =
+      CalcPolynomialFromGramLower<double>(monomial_basis, Q_lower);
+  EXPECT_TRUE(ret2.EqualToAfterExpansion(ret_expected));
+}
+
+GTEST_TEST(CalcPolynomialFromGram, Test2) {
+  const symbolic::Variable x("x");
+  // monomial_basis = [x, x², 1]
+  const Vector3<symbolic::Monomial> monomial_basis(
+      symbolic::Monomial(x, 1), symbolic::Monomial(x, 2), symbolic::Monomial());
+  Eigen::Matrix3d Q;
+  // clang-format off
+  Q << 1, 3, 3.5,
+       3, 2, 4,
+       3.5, 4, 3;
+  // clang-format on
+  Matrix3<symbolic::Variable> Q_var;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      Q_var(i, j) = symbolic::Variable(fmt::format("Q({}, {})", i, j));
+    }
+  }
+  Vector6<symbolic::Variable> Q_lower_var;
+  Q_lower_var << Q_var(0, 0), Q_var(1, 0), Q_var(2, 0), Q_var(1, 1),
+      Q_var(2, 1), Q_var(2, 2);
+
+  solvers::MathematicalProgramResult result;
+  // set result to store Q1.
+  std::unordered_map<symbolic::Variable::Id, int> decision_variable_index;
+  int variable_count = 0;
+  Eigen::Matrix<double, 9, 1> Q_val_flat;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      decision_variable_index.emplace(Q_var(i, j).get_id(), variable_count);
+      Q_val_flat(variable_count) = Q(i, j);
+      variable_count++;
+    }
+  }
+  result.set_decision_variable_index(decision_variable_index);
+  result.set_x_val(Q_val_flat);
+
+  const auto ret1 = CalcPolynomialFromGram(monomial_basis, Q_var, result);
+  // ret should be 6x³ + 7x + 2x⁴ + 9x²+3
+  const symbolic::Polynomial ret_expected{{{symbolic::Monomial(x, 3), 6},
+                                           {symbolic::Monomial(x, 1), 7},
+                                           {symbolic::Monomial(x, 4), 2},
+                                           {symbolic::Monomial(x, 2), 9},
+                                           {symbolic::Monomial(), 3}}};
+  EXPECT_TRUE(ret1.EqualToAfterExpansion(ret_expected));
+  const auto ret2 =
+      CalcPolynomialFromGramLower(monomial_basis, Q_lower_var, result);
+  EXPECT_TRUE(ret2.EqualToAfterExpansion(ret_expected));
+}
+
+GTEST_TEST(SymmetricMatrixFromLower, Test) {
+  Eigen::MatrixXd mat1;
+  SymmetricMatrixFromLower<double>(2, Eigen::Vector3d(1, 2, 3), &mat1);
+  Eigen::Matrix2d mat1_expected;
+  // clang-format off
+  mat1_expected << 1, 2,
+                   2, 3;
+  // clang-format on
+  EXPECT_TRUE(CompareMatrices(mat1, mat1_expected));
+
+  Vector6<double> lower2;
+  lower2 << 1, 2, 3, 4, 5, 6;
+  Eigen::Matrix3d mat2_expected;
+  // clang-format off
+  mat2_expected << 1, 2, 3,
+                   2, 4, 5,
+                   3, 5, 6;
+  // clang-format on
+  Eigen::MatrixXd mat2;
+  SymmetricMatrixFromLower<double>(3, lower2, &mat2);
+  EXPECT_TRUE(CompareMatrices(mat2, mat2_expected));
+}
+
+GTEST_TEST(AddInscribedEllipsoid, Test1) {
+  // Test an ellipsoid inside the box with four corners (-1, 0), (1, 0), (-1,
+  // 2), (1, 2). Find the largest inscribed ellipsoid.
+  solvers::MathematicalProgram prog;
+  const auto P = prog.NewSymmetricContinuousVariables<2>();
+  const auto q = prog.NewContinuousVariables<2>();
+
+  const Eigen::Vector2d t_lower(-1, 0);
+  const Eigen::Vector2d t_upper(1, 2);
+  AddInscribedEllipsoid(&prog, Eigen::MatrixXd::Zero(0, 2), Eigen::VectorXd(0),
+                        t_lower, t_upper, P, q);
+  prog.AddMaximizeLogDeterminantSymmetricMatrixCost(
+      P.cast<symbolic::Expression>());
+  const auto result = solvers::Solve(prog);
+  const double tol = 1E-7;
+  EXPECT_TRUE(
+      CompareMatrices(result.GetSolution(q), Eigen::Vector2d(0, 1), tol));
+  const auto P_sol = result.GetSolution(P);
+  EXPECT_TRUE(CompareMatrices(P_sol * P_sol.transpose(),
+                              Eigen::Matrix2d::Identity(), tol));
+}
+
+GTEST_TEST(AddInscribedEllipsoid, Test2) {
+  // Test an ellipsoid inside the box with four corners (0, 0), (1, 1), (-1,
+  // 1), (2, 0). Find the largest inscribed ellipsoid.
+  solvers::MathematicalProgram prog;
+  const auto P = prog.NewSymmetricContinuousVariables<2>();
+  const auto q = prog.NewContinuousVariables<2>();
+
+  const Eigen::Vector2d t_lower(-1, 0);
+  const Eigen::Vector2d t_upper(1, 2);
+  Eigen::Matrix<double, 4, 2> C;
+  // clang-format off
+  C << 1, 1,
+       -1, 1,
+       1, -1,
+       -1, -1;
+  // clang-format on
+  const Eigen::Vector4d d(2, 2, 0, 0);
+  AddInscribedEllipsoid(&prog, C, d, t_lower, t_upper, P, q);
+  prog.AddMaximizeLogDeterminantSymmetricMatrixCost(
+      P.cast<symbolic::Expression>());
+  const auto result = solvers::Solve(prog);
+  const double tol = 1E-7;
+  EXPECT_TRUE(
+      CompareMatrices(result.GetSolution(q), Eigen::Vector2d(0, 1), tol));
+  const auto P_sol = result.GetSolution(P);
+  EXPECT_TRUE(CompareMatrices(P_sol * P_sol.transpose(),
+                              0.5 * Eigen::Matrix2d::Identity(), tol));
 }
 }  // namespace multibody
 }  // namespace drake

@@ -92,6 +92,36 @@ void BoundPolyhedronByBox(const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
     (*x_upper)(i) = -result.get_optimal_cost();
   }
 }
+
+template <typename T>
+void CalcDminusCt(const Eigen::Ref<const MatrixX<T>>& C,
+                  const Eigen::Ref<const VectorX<T>>& d,
+                  const std::vector<symbolic::Monomial>& t_monomials,
+                  VectorX<symbolic::Polynomial>* d_minus_Ct) {
+  // Now build the polynomials d(i) - C.row(i) * t
+  DRAKE_DEMAND(C.rows() == d.rows() &&
+               C.cols() == static_cast<int>(t_monomials.size()));
+  d_minus_Ct->resize(C.rows());
+  const symbolic::Monomial monomial_one{};
+  symbolic::Polynomial::MapType d_minus_Ct_poly_map;
+  for (int i = 0; i < C.rows(); ++i) {
+    for (int j = 0; j < static_cast<int>(t_monomials.size()); ++j) {
+      auto it = d_minus_Ct_poly_map.find(t_monomials[j]);
+      if (it == d_minus_Ct_poly_map.end()) {
+        d_minus_Ct_poly_map.emplace_hint(it, t_monomials[j], -C(i, j));
+      } else {
+        it->second = -C(i, j);
+      }
+    }
+    auto it = d_minus_Ct_poly_map.find(monomial_one);
+    if (it == d_minus_Ct_poly_map.end()) {
+      d_minus_Ct_poly_map.emplace_hint(it, monomial_one, d(i));
+    } else {
+      it->second = d(i);
+    }
+    (*d_minus_Ct)(i) = symbolic::Polynomial(d_minus_Ct_poly_map);
+  }
+}
 }  // namespace
 
 CspaceFreeRegion::CspaceFreeRegion(
@@ -402,32 +432,13 @@ CspaceFreeRegion::ConstructProgramForCspacePolytope(
     }
   }
   // Now build the polynomials d(i) - C.row(i) * t
-  DRAKE_DEMAND(C.rows() == d.rows() && C.cols() == t.rows());
   VectorX<symbolic::Polynomial> d_minus_Ct_polynomial(C.rows());
   std::vector<symbolic::Monomial> t_monomials;
   t_monomials.reserve(t.rows());
   for (int i = 0; i < t.rows(); ++i) {
     t_monomials.emplace_back(t(i));
   }
-  const symbolic::Monomial monomial_one{};
-  symbolic::Polynomial::MapType d_minus_Ct_poly_map;
-  for (int i = 0; i < C.rows(); ++i) {
-    for (int j = 0; j < t.rows(); ++j) {
-      auto it = d_minus_Ct_poly_map.find(t_monomials[j]);
-      if (it == d_minus_Ct_poly_map.end()) {
-        d_minus_Ct_poly_map.emplace_hint(it, t_monomials[j], -C(i, j));
-      } else {
-        it->second = -C(i, j);
-      }
-    }
-    auto it = d_minus_Ct_poly_map.find(monomial_one);
-    if (it == d_minus_Ct_poly_map.end()) {
-      d_minus_Ct_poly_map.emplace_hint(it, monomial_one, d(i));
-    } else {
-      it->second = d(i);
-    }
-    d_minus_Ct_polynomial(i) = symbolic::Polynomial(d_minus_Ct_poly_map);
-  }
+  CalcDminusCt<double>(C, d, t_monomials, &d_minus_Ct_polynomial);
 
   // Build the polynomial for t-t_lower and t_upper-t
   Eigen::VectorXd t_lower, t_upper;
@@ -495,6 +506,233 @@ bool CspaceFreeRegion::IsPostureInCollision(
   return false;
 }
 
+void CspaceFreeRegion::GenerateTuplesForBilinearAlternation(
+    const Eigen::Ref<const Eigen::VectorXd>& q_star,
+    const FilteredCollisionPairs& filtered_collision_pairs, int C_rows,
+    std::vector<CspaceFreeRegion::CspacePolytopeTuple>* alternation_tuples,
+    VectorX<symbolic::Polynomial>* d_minus_Ct, MatrixX<symbolic::Variable>* C,
+    VectorX<symbolic::Variable>* d,
+    VectorX<symbolic::Variable>* lagrangian_gram_vars,
+    VectorX<symbolic::Variable>* verified_gram_vars,
+    VectorX<symbolic::Variable>* separating_plane_vars) const {
+  // Create variables C and d.
+  const auto& t = rational_forward_kinematics_.t();
+  C->resize(C_rows, t.rows());
+  d->resize(C_rows);
+  for (int i = 0; i < C_rows; ++i) {
+    for (int j = 0; j < t.rows(); ++j) {
+      (*C)(i, j) = symbolic::Variable(fmt::format("C({}, {})", i, j));
+    }
+    (*d)(i) = symbolic::Variable(fmt::format("d({})", i));
+  }
+  std::vector<symbolic::Monomial> t_monomials;
+  t_monomials.reserve(t.rows());
+  for (int i = 0; i < t.rows(); ++i) {
+    t_monomials.emplace_back(t(i));
+  }
+  CalcDminusCt<symbolic::Variable>(*C, *d, t_monomials, d_minus_Ct);
+
+  // Build the polynomial for t-t_lower and t_upper-t
+  Eigen::VectorXd t_lower, t_upper;
+  ComputeBoundsOnT(
+      q_star, rational_forward_kinematics_.plant().GetPositionLowerLimits(),
+      rational_forward_kinematics_.plant().GetPositionUpperLimits(), &t_lower,
+      &t_upper);
+  VectorX<symbolic::Polynomial> t_minus_t_lower_poly(t.rows());
+  VectorX<symbolic::Polynomial> t_upper_minus_t_poly(t.rows());
+  ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper,
+                             &t_minus_t_lower_poly, &t_upper_minus_t_poly);
+
+  // Build tuples.
+  const auto rationals =
+      GenerateLinkOnOneSideOfPlaneRationals(q_star, filtered_collision_pairs);
+  alternation_tuples->reserve(rationals.size());
+  // Get the monomial basis for each kinematics chain.
+  std::unordered_map<SortedPair<multibody::BodyIndex>,
+                     VectorX<symbolic::Monomial>>
+      map_chain_to_monomial_basis;
+  // Count the total number of variables for all Gram matrices and allocate the
+  // memory for once. It is time consuming to allocate each Gram matrix
+  // variables within a for loop.
+  // Also count the total number of variables for all separating plane decision
+  // variables.
+  int lagrangian_gram_vars_count = 0;
+  int verified_gram_vars_count = 0;
+  for (int i = 0; i < static_cast<int>(rationals.size()); ++i) {
+    VectorX<symbolic::Monomial> monomial_basis_chain;
+    FindMonomialBasisForPolytopicRegion(
+        rational_forward_kinematics_, rationals[i],
+        &map_chain_to_monomial_basis, &monomial_basis_chain);
+    std::vector<int> polytope_lagrangian_gram_lower_start(C->rows());
+    const int gram_lower_size =
+        monomial_basis_chain.rows() * (monomial_basis_chain.rows() + 1) / 2;
+    for (int j = 0; j < C->rows(); ++j) {
+      polytope_lagrangian_gram_lower_start[j] =
+          lagrangian_gram_vars_count + j * gram_lower_size;
+    }
+    std::vector<int> t_lower_lagrangian_gram_lower_start(t.rows());
+    for (int j = 0; j < t.rows(); ++j) {
+      t_lower_lagrangian_gram_lower_start[j] =
+          lagrangian_gram_vars_count + (C->rows() + j) * gram_lower_size;
+    }
+    std::vector<int> t_upper_lagrangian_gram_lower_start(t.rows());
+    for (int j = 0; j < t.rows(); ++j) {
+      t_upper_lagrangian_gram_lower_start[j] =
+          lagrangian_gram_vars_count +
+          (C->rows() + t.rows() + j) * gram_lower_size;
+    }
+    alternation_tuples->emplace_back(
+        rationals[i].rational.numerator(), polytope_lagrangian_gram_lower_start,
+        t_lower_lagrangian_gram_lower_start,
+        t_upper_lagrangian_gram_lower_start, verified_gram_vars_count,
+        monomial_basis_chain);
+    // Each Gram matrix is of size monomial_basis_chain.rows() *
+    // (monomial_basis_chain.rows() + 1) / 2. Each rational needs C.rows() + 2 *
+    // t.rows() Lagrangians.
+    lagrangian_gram_vars_count += gram_lower_size * (C_rows + 2 * t.rows());
+    verified_gram_vars_count +=
+        monomial_basis_chain.rows() * (monomial_basis_chain.rows() + 1) / 2;
+  }
+  lagrangian_gram_vars->resize(lagrangian_gram_vars_count);
+  for (int i = 0; i < lagrangian_gram_vars_count; ++i) {
+    (*lagrangian_gram_vars)(i) =
+        symbolic::Variable(fmt::format("l_gram({})", i));
+  }
+  verified_gram_vars->resize(verified_gram_vars_count);
+  for (int i = 0; i < verified_gram_vars_count; ++i) {
+    (*verified_gram_vars)(i) =
+        symbolic::Variable(fmt::format("verified_gram({})", i));
+  }
+  // Set separating_plane_vars.
+  int separating_plane_vars_count = 0;
+  for (const auto& separating_plane : separating_planes_) {
+    separating_plane_vars_count += separating_plane.decision_variables.rows();
+  }
+  separating_plane_vars->resize(separating_plane_vars_count);
+  separating_plane_vars_count = 0;
+  for (const auto& separating_plane : separating_planes_) {
+    separating_plane_vars->segment(separating_plane_vars_count,
+                                   separating_plane.decision_variables.rows()) =
+        separating_plane.decision_variables;
+    separating_plane_vars_count += separating_plane.decision_variables.rows();
+  }
+}
+
+std::unique_ptr<solvers::MathematicalProgram>
+CspaceFreeRegion::ConstructLagrangianProgram(
+    const std::vector<CspacePolytopeTuple>& alternation_tuples,
+    const Eigen::Ref<const Eigen::MatrixXd>& C,
+    const Eigen::Ref<const Eigen::VectorXd>& d,
+    const VectorX<symbolic::Variable>& lagrangian_gram_vars,
+    const VectorX<symbolic::Variable>& verified_gram_vars,
+    const VectorX<symbolic::Variable>& separating_plane_vars,
+    const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+    const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+    const VerificationOption& option, MatrixX<symbolic::Variable>* P,
+    VectorX<symbolic::Variable>* q) const {
+  // TODO(hongkai.dai): support more nonnegative polynomials.
+  if (option.lagrangian_type !=
+      solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
+    throw std::runtime_error("Only support sos polynomial for now");
+  }
+  if (option.link_polynomial_type !=
+      solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
+    throw std::runtime_error("Only support sos polynomial for now");
+  }
+  auto prog = std::make_unique<solvers::MathematicalProgram>();
+  // Adds decision variables.
+  prog->AddDecisionVariables(lagrangian_gram_vars);
+  prog->AddDecisionVariables(verified_gram_vars);
+  prog->AddDecisionVariables(separating_plane_vars);
+
+  // Compute d-C*t, t - t_lower and t_upper - t.
+  const auto& t = rational_forward_kinematics_.t();
+  std::vector<symbolic::Monomial> t_monomials;
+  t_monomials.reserve(t.rows());
+  for (int i = 0; i < t.rows(); ++i) {
+    t_monomials.emplace_back(t(i));
+  }
+  VectorX<symbolic::Polynomial> d_minus_Ct;
+  CalcDminusCt<double>(C, d, t_monomials, &d_minus_Ct);
+  VectorX<symbolic::Polynomial> t_minus_t_lower(t.rows());
+  VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
+  ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper, &t_minus_t_lower,
+                             &t_upper_minus_t);
+  // For each rational numerator, add the constraint that the Lagrangian
+  // polynomials >= 0, and the verified polynomial >= 0.
+  //
+  // Within each rational, all the lagrangians and the verified polynomial has
+  // same gram size. This gram size only depends on the number of joints on the
+  // kinematics chain, hence we can reuse the same gram matrix without
+  // reallocating the memory.
+  std::unordered_map<int, MatrixX<symbolic::Variable>> size_to_gram;
+  for (const auto& tuple : alternation_tuples) {
+    const int gram_rows = tuple.monomial_basis.rows();
+    const int gram_lower_size = gram_rows * (gram_rows + 1) / 2;
+    symbolic::Polynomial verified_polynomial = tuple.rational_numerator;
+    auto it = size_to_gram.find(gram_rows);
+    if (it == size_to_gram.end()) {
+      it = size_to_gram.emplace_hint(
+          it, gram_rows, MatrixX<symbolic::Variable>(gram_rows, gram_rows));
+    }
+    MatrixX<symbolic::Variable>& gram_mat = it->second;
+
+    // This lambda does three things.
+    // 1. Compute the Gram matrix.
+    // 2. Constraint the Gram matrix to be PSD.
+    // 3. subtract lagrangian(t) * constraint_polynomial from
+    // verified_polynomial.
+    auto constrain_lagrangian =
+        [&gram_mat, &verified_polynomial, &lagrangian_gram_vars, &prog,
+         gram_lower_size](int lagrangian_gram_lower_start,
+                          const VectorX<symbolic::Monomial>& monomial_basis,
+                          const symbolic::Polynomial& constraint_polynomial) {
+          SymmetricMatrixFromLower<symbolic::Variable>(
+              gram_mat.rows(),
+              lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
+                                           gram_lower_size),
+              &gram_mat);
+          prog->AddPositiveSemidefiniteConstraint(gram_mat);
+          verified_polynomial -= CalcPolynomialFromGram<symbolic::Variable>(
+                                     monomial_basis, gram_mat) *
+                                 constraint_polynomial;
+        };
+    // Handle lagrangian l_polytope(t).
+    for (int i = 0; i < C.rows(); ++i) {
+      constrain_lagrangian(tuple.polytope_lagrangian_gram_lower_start[i],
+                           tuple.monomial_basis, d_minus_Ct(i));
+    }
+    // Handle lagrangian l_lower(t) and l_upper(t).
+    for (int i = 0; i < t.rows(); ++i) {
+      constrain_lagrangian(tuple.t_lower_lagrangian_gram_lower_start[i],
+                           tuple.monomial_basis, t_minus_t_lower(i));
+      constrain_lagrangian(tuple.t_upper_lagrangian_gram_lower_start[i],
+                           tuple.monomial_basis, t_upper_minus_t(i));
+    }
+    // Now constrain that verified_polynomial is non-negative.
+    SymmetricMatrixFromLower<symbolic::Variable>(
+        gram_rows,
+        verified_gram_vars.segment(tuple.verified_polynomial_gram_lower_start,
+                                   gram_lower_size),
+        &gram_mat);
+    prog->AddPositiveSemidefiniteConstraint(gram_mat);
+    const symbolic::Polynomial verified_polynomial_expected =
+        CalcPolynomialFromGram<symbolic::Variable>(tuple.monomial_basis,
+                                                   gram_mat);
+    const symbolic::Polynomial poly_diff{verified_polynomial -
+                                         verified_polynomial_expected};
+    for (const auto& item : poly_diff.monomial_to_coefficient_map()) {
+      prog->AddLinearEqualityConstraint(item.second, 0);
+    }
+  }
+  if (P != nullptr && q != nullptr) {
+    *P = prog->NewSymmetricContinuousVariables(t.rows(), "P");
+    *q = prog->NewContinuousVariables(t.rows(), "q");
+    AddInscribedEllipsoid(prog.get(), C, d, t_lower, t_upper, *P, *q, false);
+  }
+  return prog;
+}
+
 std::vector<LinkVertexOnPlaneSideRational>
 GenerateLinkOnOneSideOfPlaneRationalFunction(
     const RationalForwardKinematics& rational_forward_kinematics,
@@ -560,6 +798,160 @@ void ComputeBoundsOnT(const Eigen::Ref<const Eigen::VectorXd>& q_star,
   *t_lower = ((q_lower - q_star) / 2).array().tan();
   *t_upper = ((q_upper - q_star) / 2).array().tan();
 }
+
+template <typename T>
+symbolic::Polynomial CalcPolynomialFromGram(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const MatrixX<T>>& gram) {
+  const int Q_rows = monomial_basis.rows();
+  DRAKE_DEMAND(gram.rows() == Q_rows && gram.cols() == Q_rows);
+  symbolic::Polynomial ret{};
+  using std::pow;
+  for (int i = 0; i < Q_rows; ++i) {
+    ret.AddProduct(gram(i, i), pow(monomial_basis(i), 2));
+    for (int j = i + 1; j < Q_rows; ++j) {
+      ret.AddProduct(gram(i, j) + gram(j, i),
+                     monomial_basis(i) * monomial_basis(j));
+    }
+  }
+  return ret;
+}
+
+symbolic::Polynomial CalcPolynomialFromGram(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& gram,
+    const solvers::MathematicalProgramResult& result) {
+  const int Q_rows = monomial_basis.rows();
+  DRAKE_DEMAND(gram.rows() == Q_rows && gram.cols() == Q_rows);
+  symbolic::Polynomial ret{};
+  using std::pow;
+  for (int i = 0; i < Q_rows; ++i) {
+    ret.AddProduct(result.GetSolution(gram(i, i)), pow(monomial_basis(i), 2));
+    for (int j = i + 1; j < Q_rows; ++j) {
+      ret.AddProduct(
+          result.GetSolution(gram(i, j)) + result.GetSolution(gram(j, i)),
+          monomial_basis(i) * monomial_basis(j));
+    }
+  }
+  return ret;
+}
+
+template <typename T>
+symbolic::Polynomial CalcPolynomialFromGramLower(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const VectorX<T>>& gram_lower) {
+  MatrixX<T> gram(monomial_basis.rows(), monomial_basis.rows());
+  SymmetricMatrixFromLower(monomial_basis.rows(), gram_lower, &gram);
+  return CalcPolynomialFromGram<T>(monomial_basis, gram);
+}
+
+symbolic::Polynomial CalcPolynomialFromGramLower(
+    const VectorX<symbolic::Monomial>& monomial_basis,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& gram_lower,
+    const solvers::MathematicalProgramResult& result) {
+  const int Q_rows = monomial_basis.rows();
+  DRAKE_DEMAND(gram_lower.rows() == Q_rows * (Q_rows + 1) / 2);
+  symbolic::Polynomial ret{};
+  using std::pow;
+  int count = 0;
+  for (int j = 0; j < Q_rows; ++j) {
+    ret.AddProduct(result.GetSolution(gram_lower(count++)),
+                   pow(monomial_basis(j), 2));
+    for (int i = j + 1; i < Q_rows; ++i) {
+      ret.AddProduct(2 * result.GetSolution(gram_lower(count++)),
+                     monomial_basis(i) * monomial_basis(j));
+    }
+  }
+  return ret;
+}
+
+template <typename T>
+void SymmetricMatrixFromLower(int mat_rows,
+                              const Eigen::Ref<const VectorX<T>>& lower,
+                              MatrixX<T>* mat) {
+  DRAKE_DEMAND(lower.rows() == mat_rows * (mat_rows + 1) / 2);
+  mat->resize(mat_rows, mat_rows);
+  int count = 0;
+  for (int j = 0; j < mat_rows; ++j) {
+    (*mat)(j, j) = lower(count++);
+    for (int i = j + 1; i < mat_rows; ++i) {
+      (*mat)(i, j) = lower(count++);
+      (*mat)(j, i) = (*mat)(i, j);
+    }
+  }
+}
+
+void AddInscribedEllipsoid(
+    solvers::MathematicalProgram* prog,
+    const Eigen::Ref<const Eigen::MatrixXd>& C,
+    const Eigen::Ref<const Eigen::VectorXd>& d,
+    const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+    const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& P,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& q,
+    bool constrain_P_psd) {
+  const int t_size = t_lower.rows();
+  DRAKE_DEMAND(C.cols() == t_size && C.rows() == d.rows());
+  DRAKE_DEMAND(t_upper.rows() == t_size && P.rows() == t_size &&
+               P.cols() == t_size && q.rows() == t_size);
+  DRAKE_DEMAND((t_upper.array() >= t_lower.array()).all());
+  if (constrain_P_psd) {
+    prog->AddPositiveSemidefiniteConstraint(P);
+  }
+  // Add constraint |cᵢᵀP|₂ ≤ dᵢ−cᵢᵀq
+  VectorX<symbolic::Expression> lorentz_cone1(t_size + 1);
+  for (int i = 0; i < C.rows(); ++i) {
+    lorentz_cone1(0) = d(i) - C.row(i).dot(q);
+    lorentz_cone1.tail(t_size) = C.row(i) * P;
+    prog->AddLorentzConeConstraint(lorentz_cone1);
+  }
+  // Add constraint |P.row(i)|₂ + qᵢ ≤ t_upper(i)
+  // Namely [t_upper(i) - q(i), P.row(i)]=lorentz_A2 * [q(i);P.row(i)] +
+  // lorentz_b2 is in the Lorentz cone.
+  Eigen::MatrixXd lorentz_A2 =
+      Eigen::MatrixXd::Identity(1 + t_size, 1 + t_size);
+  lorentz_A2(0, 0) = -1;
+  Eigen::VectorXd lorentz_b2 = Eigen::VectorXd::Zero(1 + t_size);
+  VectorX<symbolic::Variable> lorentz_var2(t_size + 1);
+  for (int i = 0; i < t_size; ++i) {
+    lorentz_b2(0) = t_upper(i);
+    lorentz_var2(0) = q(i);
+    lorentz_var2.tail(t_size) = P.row(i);
+    prog->AddLorentzConeConstraint(lorentz_A2, lorentz_b2, lorentz_var2);
+  }
+  // Add constraint −|P.row(i)|₂ + qᵢ ≥ t_lower(i)
+  // Namely [q(i)-t_lower(i), P.row(i)]=lorentz_A2 * [q(i);P.row(i)] +
+  // lorentz_b2 is in the Lorentz cone.
+  lorentz_A2 = Eigen::MatrixXd::Identity(1 + t_size, 1 + t_size);
+  lorentz_b2 = Eigen::VectorXd::Zero(1 + t_size);
+  for (int i = 0; i < t_size; ++i) {
+    lorentz_b2(0) = -t_lower(i);
+    lorentz_var2(0) = q(i);
+    lorentz_var2.tail(t_size) = P.row(i);
+    prog->AddLorentzConeConstraint(lorentz_A2, lorentz_b2, lorentz_var2);
+  }
+}
+
+// Explicit instantiation.
+template symbolic::Polynomial CalcPolynomialFromGram<double>(
+    const VectorX<symbolic::Monomial>&,
+    const Eigen::Ref<const MatrixX<double>>&);
+template symbolic::Polynomial CalcPolynomialFromGram<symbolic::Variable>(
+    const VectorX<symbolic::Monomial>&,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>&);
+
+template symbolic::Polynomial CalcPolynomialFromGramLower<double>(
+    const VectorX<symbolic::Monomial>&,
+    const Eigen::Ref<const VectorX<double>>&);
+template symbolic::Polynomial CalcPolynomialFromGramLower<symbolic::Variable>(
+    const VectorX<symbolic::Monomial>&,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>&);
+
+template void SymmetricMatrixFromLower<double>(
+    int mat_rows, const Eigen::Ref<const Eigen::VectorXd>&, Eigen::MatrixXd*);
+template void SymmetricMatrixFromLower<symbolic::Variable>(
+    int mat_rows, const Eigen::Ref<const VectorX<symbolic::Variable>>&,
+    MatrixX<symbolic::Variable>*);
 
 }  // namespace multibody
 }  // namespace drake
