@@ -510,8 +510,10 @@ void CspaceFreeRegion::GenerateTuplesForBilinearAlternation(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
     const FilteredCollisionPairs& filtered_collision_pairs, int C_rows,
     std::vector<CspaceFreeRegion::CspacePolytopeTuple>* alternation_tuples,
-    VectorX<symbolic::Polynomial>* d_minus_Ct, MatrixX<symbolic::Variable>* C,
-    VectorX<symbolic::Variable>* d,
+    VectorX<symbolic::Polynomial>* d_minus_Ct, Eigen::VectorXd* t_lower,
+    Eigen::VectorXd* t_upper, VectorX<symbolic::Polynomial>* t_minus_t_lower,
+    VectorX<symbolic::Polynomial>* t_upper_minus_t,
+    MatrixX<symbolic::Variable>* C, VectorX<symbolic::Variable>* d,
     VectorX<symbolic::Variable>* lagrangian_gram_vars,
     VectorX<symbolic::Variable>* verified_gram_vars,
     VectorX<symbolic::Variable>* separating_plane_vars) const {
@@ -533,15 +535,12 @@ void CspaceFreeRegion::GenerateTuplesForBilinearAlternation(
   CalcDminusCt<symbolic::Variable>(*C, *d, t_monomials, d_minus_Ct);
 
   // Build the polynomial for t-t_lower and t_upper-t
-  Eigen::VectorXd t_lower, t_upper;
   ComputeBoundsOnT(
       q_star, rational_forward_kinematics_.plant().GetPositionLowerLimits(),
-      rational_forward_kinematics_.plant().GetPositionUpperLimits(), &t_lower,
-      &t_upper);
-  VectorX<symbolic::Polynomial> t_minus_t_lower_poly(t.rows());
-  VectorX<symbolic::Polynomial> t_upper_minus_t_poly(t.rows());
-  ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper,
-                             &t_minus_t_lower_poly, &t_upper_minus_t_poly);
+      rational_forward_kinematics_.plant().GetPositionUpperLimits(), t_lower,
+      t_upper);
+  ConstructTBoundsPolynomial(t_monomials, *t_lower, *t_upper, t_minus_t_lower,
+                             t_upper_minus_t);
 
   // Build tuples.
   const auto rationals =
@@ -733,6 +732,94 @@ CspaceFreeRegion::ConstructLagrangianProgram(
   return prog;
 }
 
+std::unique_ptr<solvers::MathematicalProgram>
+CspaceFreeRegion::ConstructPolytopeProgram(
+    const std::vector<CspaceFreeRegion::CspacePolytopeTuple>&
+        alternation_tuples,
+    const MatrixX<symbolic::Variable>& C, const VectorX<symbolic::Variable>& d,
+    const VectorX<symbolic::Polynomial>& d_minus_Ct,
+    const Eigen::VectorXd& lagrangian_gram_var_vals,
+    const VectorX<symbolic::Variable>& verified_gram_vars,
+    const VectorX<symbolic::Variable>& separating_plane_vars,
+    const VectorX<symbolic::Polynomial>& t_minus_t_lower,
+    const VectorX<symbolic::Polynomial>& t_upper_minus_t,
+    const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
+    const VerificationOption& option,
+    VectorX<symbolic::Variable>* margin) const {
+  if (option.link_polynomial_type !=
+      solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
+    throw std::runtime_error("Only support sos polynomial for now");
+  }
+  auto prog = std::make_unique<solvers::MathematicalProgram>();
+  // Add the decision variables.
+  prog->AddDecisionVariables(Eigen::Map<const VectorX<symbolic::Variable>>(
+      C.data(), C.rows() * C.cols()));
+  prog->AddDecisionVariables(d);
+  prog->AddDecisionVariables(verified_gram_vars);
+  prog->AddDecisionVariables(separating_plane_vars);
+
+  // For each rational numerator, we will impose positivity (like PSD matrix)
+  // constraint on its Gram matrix. This gram size only depends on the number of
+  // joints on the kinematics chain, hence we can reuse the same gram matrix
+  // without reallocating the memory.
+  std::unordered_map<int, MatrixX<symbolic::Variable>> size_to_gram;
+  for (const auto& tuple : alternation_tuples) {
+    symbolic::Polynomial verified_polynomial = tuple.rational_numerator;
+    const auto& monomial_basis = tuple.monomial_basis;
+    const int gram_rows = monomial_basis.rows();
+    const int gram_lower_size = gram_rows * (gram_rows + 1) / 2;
+    // add_lagrangian adds the term -lagrangian(t) * constraint(t) to
+    // verified_polynomial.
+    auto add_lagrangian = [&verified_polynomial, &lagrangian_gram_var_vals,
+                           &monomial_basis, gram_lower_size](
+                              int lagrangian_var_start,
+                              const symbolic::Polynomial& constraint) {
+      verified_polynomial -=
+          CalcPolynomialFromGramLower<double>(
+              monomial_basis, lagrangian_gram_var_vals.segment(
+                                  lagrangian_var_start, gram_lower_size)) *
+          constraint;
+    };
+
+    for (int i = 0; i < C.rows(); ++i) {
+      add_lagrangian(tuple.polytope_lagrangian_gram_lower_start[i],
+                     d_minus_Ct(i));
+    }
+    for (int i = 0; i < rational_forward_kinematics_.t().rows(); ++i) {
+      add_lagrangian(tuple.t_lower_lagrangian_gram_lower_start[i],
+                     t_minus_t_lower(i));
+      add_lagrangian(tuple.t_upper_lagrangian_gram_lower_start[i],
+                     t_upper_minus_t(i));
+    }
+    auto it = size_to_gram.find(gram_rows);
+    if (it == size_to_gram.end()) {
+      it = size_to_gram.emplace_hint(
+          it, gram_rows, MatrixX<symbolic::Variable>(gram_rows, gram_rows));
+    }
+    MatrixX<symbolic::Variable>& verified_gram = it->second;
+    SymmetricMatrixFromLower<symbolic::Variable>(
+        tuple.monomial_basis.rows(),
+        verified_gram_vars.segment(tuple.verified_polynomial_gram_lower_start,
+                                   gram_lower_size),
+        &verified_gram);
+    prog->AddPositiveSemidefiniteConstraint(verified_gram);
+    const symbolic::Polynomial verified_polynomial_expected =
+        CalcPolynomialFromGram<symbolic::Variable>(tuple.monomial_basis,
+                                                   verified_gram);
+    const symbolic::Polynomial poly_diff{verified_polynomial -
+                                         verified_polynomial_expected};
+    for (const auto& item : poly_diff.monomial_to_coefficient_map()) {
+      prog->AddLinearEqualityConstraint(item.second, 0);
+    }
+  }
+
+  *margin = prog->NewContinuousVariables(C.rows(), "margin");
+  AddOuterPolytope(prog.get(), P, q, C, d, *margin);
+  // margin >= 0.
+  prog->AddBoundingBoxConstraint(0, kInf, *margin);
+  return prog;
+}
+
 std::vector<LinkVertexOnPlaneSideRational>
 GenerateLinkOnOneSideOfPlaneRationalFunction(
     const RationalForwardKinematics& rational_forward_kinematics,
@@ -840,9 +927,19 @@ template <typename T>
 symbolic::Polynomial CalcPolynomialFromGramLower(
     const VectorX<symbolic::Monomial>& monomial_basis,
     const Eigen::Ref<const VectorX<T>>& gram_lower) {
-  MatrixX<T> gram(monomial_basis.rows(), monomial_basis.rows());
-  SymmetricMatrixFromLower(monomial_basis.rows(), gram_lower, &gram);
-  return CalcPolynomialFromGram<T>(monomial_basis, gram);
+  // I want to avoid dynamically allocating memory for the gram matrix.
+  symbolic::Polynomial ret{};
+  const int gram_rows = monomial_basis.rows();
+  int gram_count = 0;
+  using std::pow;
+  for (int j = 0; j < gram_rows; ++j) {
+    ret.AddProduct(gram_lower(gram_count++), pow(monomial_basis(j), 2));
+    for (int i = j + 1; i < gram_rows; ++i) {
+      ret.AddProduct(2 * gram_lower(gram_count++),
+                     monomial_basis(i) * monomial_basis(j));
+    }
+  }
+  return ret;
 }
 
 symbolic::Polynomial CalcPolynomialFromGramLower(
@@ -929,6 +1026,43 @@ void AddInscribedEllipsoid(
     lorentz_var2(0) = q(i);
     lorentz_var2.tail(t_size) = P.row(i);
     prog->AddLorentzConeConstraint(lorentz_A2, lorentz_b2, lorentz_var2);
+  }
+}
+
+void AddOuterPolytope(
+    solvers::MathematicalProgram* prog,
+    const Eigen::Ref<const Eigen::MatrixXd>& P,
+    const Eigen::Ref<const Eigen::VectorXd>& q,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& C,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& d,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& margin) {
+  DRAKE_DEMAND(P.rows() == P.cols());
+  // Add the constraint |cᵢᵀP|₂ ≤ dᵢ − cᵢᵀq − δᵢ as a Lorentz cone constraint,
+  // namely [dᵢ − cᵢᵀq − δᵢ, cᵢᵀP] is in the Lorentz cone.
+  // [dᵢ − cᵢᵀq − δᵢ, cᵢᵀP] = A_lorentz1 * [cᵢᵀ, dᵢ, δᵢ] + b_lorentz1
+  Eigen::MatrixXd A_lorentz1(P.rows() + 1, 2 + C.cols());
+  Eigen::VectorXd b_lorentz1(P.rows() + 1);
+  VectorX<symbolic::Variable> lorentz1_vars(2 + C.cols());
+  for (int i = 0; i < C.rows(); ++i) {
+    A_lorentz1.setZero();
+    A_lorentz1(0, C.cols()) = 1;
+    A_lorentz1(0, C.cols() + 1) = -1;
+    A_lorentz1.block(0, 0, 1, C.cols()) = -q.transpose();
+    A_lorentz1.block(1, 0, P.rows(), P.cols()) = P;
+    b_lorentz1.setZero();
+    lorentz1_vars << C.row(i).transpose(), d(i), margin(i);
+    prog->AddLorentzConeConstraint(A_lorentz1, b_lorentz1, lorentz1_vars);
+  }
+  // Add the constraint |cᵢᵀ|₂ ≤ 1 as a Lorentz cone constraint that [1, cᵢᵀ] is
+  // in the Lorentz cone.
+  // [1, cᵢᵀ] = A_lorentz2 * cᵢᵀ + b_lorentz2
+  Eigen::MatrixXd A_lorentz2 = Eigen::MatrixXd::Zero(1 + C.cols(), C.cols());
+  A_lorentz2.bottomRows(C.cols()) =
+      Eigen::MatrixXd::Identity(C.cols(), C.cols());
+  Eigen::VectorXd b_lorentz2 = Eigen::VectorXd::Zero(1 + C.cols());
+  b_lorentz2(0) = 1;
+  for (int i = 0; i < C.rows(); ++i) {
+    prog->AddLorentzConeConstraint(A_lorentz2, b_lorentz2, C.row(i));
   }
 }
 

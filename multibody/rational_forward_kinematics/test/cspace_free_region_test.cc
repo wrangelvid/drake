@@ -14,6 +14,7 @@
 #include "drake/solvers/common_solver_option.h"
 #include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/solve.h"
+#include "drake/solvers/mosek_solver.h"
 
 namespace drake {
 namespace multibody {
@@ -22,6 +23,9 @@ using drake::VectorX;
 using drake::math::RigidTransformd;
 using drake::math::RotationMatrixd;
 using drake::multibody::BodyIndex;
+
+const double kInf = std::numeric_limits<double>::infinity();
+
 class IiwaCspaceTest : public IiwaTest {
  public:
   IiwaCspaceTest() {
@@ -370,8 +374,12 @@ void ConstructInitialCspacePolytope(const CspaceFreeRegion& dut,
        1.5, -0.1, 0.6, 1.5, 0.4, 2.1, 0.3,
        0.5, 1.5, 0.3, 0.2, 1.5, -0.1, 0.5,
        0.5, 0.2, -0.1, 1.2, -0.3, 1.1, -0.4;
-
   // clang-format on
+  
+  // Now I normalize each row of C. Because later when we search for the polytope we have the constraint that |C.row()|<=1, so it is better to start with a C satisfying this constraint.
+  for (int i = 0; i < C->rows(); ++i) {
+    C->row(i).normalize();
+  }
   // Now I take some samples of t slightly away from q_not_in_collision. C * t
   // <= d contains all these samples.
   Eigen::Matrix<double, 7, 6> t_samples;
@@ -505,12 +513,15 @@ TEST_F(IiwaCspaceTest, GenerateTuplesForBilinearAlternation) {
   const int C_rows = 5;
   std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
   VectorX<symbolic::Polynomial> d_minus_Ct;
+  Eigen::VectorXd t_lower, t_upper;
+  VectorX<symbolic::Polynomial> t_minus_t_lower, t_upper_minus_t;
   MatrixX<symbolic::Variable> C_var;
   VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
       separating_plane_vars;
   dut.GenerateTuplesForBilinearAlternation(
-      q_star, {}, C_rows, &alternation_tuples, &d_minus_Ct, &C_var, &d_var,
-      &lagrangian_gram_vars, &verified_gram_vars, &separating_plane_vars);
+      q_star, {}, C_rows, &alternation_tuples, &d_minus_Ct, &t_lower, &t_upper,
+      &t_minus_t_lower, &t_upper_minus_t, &C_var, &d_var, &lagrangian_gram_vars,
+      &verified_gram_vars, &separating_plane_vars);
   int rational_count = 0;
   for (const auto& separating_plane : dut.separating_planes()) {
     rational_count += separating_plane.positive_side_polytope->p_BV().cols() +
@@ -543,6 +554,20 @@ TEST_F(IiwaCspaceTest, GenerateTuplesForBilinearAlternation) {
                             lagrangian_gram_vars_start.end()));
     verified_gram_vars_start.insert(tuple.verified_polynomial_gram_lower_start);
   }
+  Eigen::VectorXd t_lower_expected, t_upper_expected;
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  ComputeBoundsOnT(q_star, plant.GetPositionLowerLimits(),
+                   plant.GetPositionUpperLimits(), &t_lower_expected,
+                   &t_upper_expected);
+  EXPECT_TRUE(CompareMatrices(t_lower, t_lower_expected));
+  EXPECT_TRUE(CompareMatrices(t_upper, t_upper_expected));
+  const auto& t = dut.rational_forward_kinematics().t();
+  for (int i = 0; i < t.rows(); ++i) {
+    EXPECT_TRUE(
+        t_minus_t_lower(i).EqualTo(symbolic::Polynomial(t(i) - t_lower(i))));
+    EXPECT_TRUE(
+        t_upper_minus_t(i).EqualTo(symbolic::Polynomial(t_upper(i) - t(i))));
+  }
   EXPECT_EQ(lagrangian_gram_vars.rows(), lagrangian_gram_vars_count);
   EXPECT_EQ(verified_gram_vars.rows(), verified_gram_vars_count);
   EXPECT_EQ(verified_gram_vars_start.size(), alternation_tuples.size());
@@ -564,7 +589,9 @@ void CheckPsd(const Eigen::Ref<const Eigen::MatrixXd>& mat, double tol) {
   EXPECT_TRUE((es.eigenvalues().array() > -tol).all());
 }
 
-TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
+TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
+  // Test both ConstructLagrangianProgram and ConstructPolytopeProgram (the
+  // latter needs the result from the former).
   const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
                              {obstacles_[0].get(), obstacles_[1].get()},
                              SeparatingPlaneOrder::kAffine,
@@ -580,22 +607,31 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
   CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
   std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
   VectorX<symbolic::Polynomial> d_minus_Ct;
+  Eigen::VectorXd t_lower, t_upper;
+  VectorX<symbolic::Polynomial> t_minus_t_lower, t_upper_minus_t;
   MatrixX<symbolic::Variable> C_var;
   VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
       separating_plane_vars;
   dut.GenerateTuplesForBilinearAlternation(
       q_star, filtered_collision_pairs, C.rows(), &alternation_tuples,
-      &d_minus_Ct, &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
+      &d_minus_Ct, &t_lower, &t_upper, &t_minus_t_lower, &t_upper_minus_t,
+      &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
       &separating_plane_vars);
-  Eigen::VectorXd t_lower, t_upper;
-  ComputeBoundsOnT(q_star, plant.GetPositionLowerLimits(),
-                   plant.GetPositionUpperLimits(), &t_lower, &t_upper);
 
   MatrixX<symbolic::Variable> P;
   VectorX<symbolic::Variable> q;
+  auto clock_start = std::chrono::system_clock::now();
   auto prog = dut.ConstructLagrangianProgram(
       alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
       separating_plane_vars, t_lower, t_upper, {}, &P, &q);
+  auto clock_finish = std::chrono::system_clock::now();
+  std::cout << "ConstructLagrangianProgram takes "
+            << static_cast<float>(
+                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                       clock_finish - clock_start)
+                       .count()) /
+                   1000
+            << "s\n";
   prog->AddMaximizeLogDeterminantSymmetricMatrixCost(
       P.cast<symbolic::Expression>());
   solvers::SolverOptions solver_options;
@@ -603,13 +639,15 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
   const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
   EXPECT_TRUE(result.is_success());
 
+  // Now check the result of finding lagrangians.
   const double psd_tol = 1E-6;
   const auto P_sol = result.GetSolution(P);
   CheckPsd(P_sol, psd_tol);
+  const auto q_sol = result.GetSolution(q);
 
   const Eigen::VectorXd lagrangian_gram_var_vals =
       result.GetSolution(lagrangian_gram_vars);
-  const Eigen::VectorXd verified_gram_var_vals =
+  Eigen::VectorXd verified_gram_var_vals =
       result.GetSolution(verified_gram_vars);
   const Eigen::VectorXd separating_plane_var_vals =
       result.GetSolution(separating_plane_vars);
@@ -619,12 +657,6 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
   const auto& t = dut.rational_forward_kinematics().t();
   for (int i = 0; i < C.rows(); ++i) {
     d_minus_Ct_poly(i) = symbolic::Polynomial(d(i) - C.row(i).dot(t));
-  }
-  VectorX<symbolic::Polynomial> t_minus_t_lower(t.rows());
-  VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
-  for (int i = 0; i < t.rows(); ++i) {
-    t_minus_t_lower(i) = symbolic::Polynomial(t(i) - t_lower(i));
-    t_upper_minus_t(i) = symbolic::Polynomial(t_upper(i) - t(i));
   }
 
   // Now check if each Gram matrix is PSD.
@@ -677,6 +709,66 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianProgram) {
     EXPECT_TRUE(verified_polynomial.CoefficientsAlmostEqual(
         verified_polynomial_expected, 1E-5));
   }
+
+  // Now test ConstructPolytopeProgram using the lagrangian result.
+  VectorX<symbolic::Variable> margin;
+  clock_start = std::chrono::system_clock::now();
+  auto prog_polytope = dut.ConstructPolytopeProgram(
+      alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
+      verified_gram_vars, separating_plane_vars, t_minus_t_lower,
+      t_upper_minus_t, P_sol, q_sol, {}, &margin);
+  clock_finish = std::chrono::system_clock::now();
+  std::cout << "ConstructPolytopeProgram takes "
+            << static_cast<float>(
+                   std::chrono::duration_cast<std::chrono::milliseconds>(
+                       clock_finish - clock_start)
+                       .count()) /
+                   1000
+            << "s\n";
+  // Number of PSD constraint is the number of SOS constraint, equal to the
+  // number of rational numerators.
+  EXPECT_EQ(prog_polytope->positive_semidefinite_constraints().size() +
+                prog_polytope->linear_matrix_inequality_constraints().size(),
+            alternation_tuples.size());
+  // Maximize the summation of margin.
+  prog_polytope->AddLinearCost(-Eigen::VectorXd::Ones(margin.rows()), 0.,
+                               margin);
+  const auto result_polytope =
+      solvers::Solve(*prog_polytope, std::nullopt, solver_options);
+  EXPECT_TRUE(result_polytope.is_success());
+  // Test the result.
+  symbolic::Environment env_polytope;
+  env_polytope.insert(separating_plane_vars, result_polytope.GetSolution(separating_plane_vars));
+  const auto C_sol = result_polytope.GetSolution(C_var);
+  const auto d_sol = result_polytope.GetSolution(d_var);
+  VectorX<symbolic::Polynomial> d_minus_Ct_sol(C.rows());
+  for (int i = 0; i < C.rows(); ++i) {
+    d_minus_Ct_sol(i) = symbolic::Polynomial(d_sol(i) - C_sol.row(i).dot(t));
+  }
+  verified_gram_var_vals = result_polytope.GetSolution(verified_gram_vars);
+  for (const auto& tuple : alternation_tuples) {
+    symbolic::Polynomial verified_polynomial = tuple.rational_numerator.EvaluatePartial(env_polytope);
+    const int gram_rows = tuple.monomial_basis.rows();
+    const int gram_lower_size = gram_rows * (gram_rows + 1) / 2;
+    for (int i = 0; i < C.rows(); ++i) {
+      verified_polynomial -= CalcPolynomialFromGramLower<double>(tuple.monomial_basis, lagrangian_gram_var_vals.segment(tuple.polytope_lagrangian_gram_lower_start[i], gram_lower_size)) * d_minus_Ct_sol(i);
+    }
+    for (int i = 0; i < t.rows(); ++i) {
+      verified_polynomial -= CalcPolynomialFromGramLower<double>(tuple.monomial_basis, lagrangian_gram_var_vals.segment(tuple.t_lower_lagrangian_gram_lower_start[i], gram_lower_size)) * t_minus_t_lower(i);
+      verified_polynomial -= CalcPolynomialFromGramLower<double>(tuple.monomial_basis, lagrangian_gram_var_vals.segment(tuple.t_upper_lagrangian_gram_lower_start[i], gram_lower_size)) * t_upper_minus_t(i);
+    }
+    Eigen::MatrixXd verified_gram;
+    SymmetricMatrixFromLower<double>(gram_rows, verified_gram_var_vals.segment(tuple.verified_polynomial_gram_lower_start, gram_lower_size), &verified_gram);
+    CheckPsd(verified_gram, psd_tol);
+    const symbolic::Polynomial verified_polynomial_expected = CalcPolynomialFromGram<double>(tuple.monomial_basis, verified_gram);
+    EXPECT_TRUE(verified_polynomial.CoefficientsAlmostEqual(verified_polynomial_expected, 1E-6));
+  }
+  // Make sure that the polytope C * t <= d contains the ellipsoid.
+  const auto margin_sol = result_polytope.GetSolution(margin);
+  EXPECT_TRUE((margin_sol.array() >= -1E-6).all());
+  for (int i = 0; i < C.rows(); ++i) {
+    EXPECT_LE((C.row(i) * P_sol).norm() + C.row(i).dot(q_sol) + margin_sol(i), d_sol(i) + 1E-6);
+  }
 }
 
 GTEST_TEST(CalcPolynomialFromGram, Test1) {
@@ -707,6 +799,7 @@ GTEST_TEST(CalcPolynomialFromGram, Test1) {
 }
 
 GTEST_TEST(CalcPolynomialFromGram, Test2) {
+  // Test the overloaded function with MathematicalProgramResult as an input.
   const symbolic::Variable x("x");
   // monomial_basis = [x, x², 1]
   const Vector3<symbolic::Monomial> monomial_basis(
@@ -827,6 +920,62 @@ GTEST_TEST(AddInscribedEllipsoid, Test2) {
   const auto P_sol = result.GetSolution(P);
   EXPECT_TRUE(CompareMatrices(P_sol * P_sol.transpose(),
                               0.5 * Eigen::Matrix2d::Identity(), tol));
+}
+
+GTEST_TEST(AddOuterPolytope, Test) {
+  solvers::MathematicalProgram prog;
+  Eigen::Matrix2d P;
+  P << 1, 2, 2, 5;
+  const Eigen::Vector2d q(3, 4);
+  constexpr int C_rows = 6;
+  const auto C = prog.NewContinuousVariables<C_rows, 2>();
+  const auto d = prog.NewContinuousVariables<C_rows>();
+  const auto margin = prog.NewContinuousVariables<C_rows>();
+  AddOuterPolytope(&prog, P, q, C, d, margin);
+  // Add the constraint that the margin is at least 0.5
+  Eigen::Matrix<double, C_rows, 1> min_margin;
+  min_margin << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6;
+  prog.AddBoundingBoxConstraint(min_margin, min_margin, margin);
+  // There is a trivial solution to set C = 0 and d>=0, and the polytope C*t<=d
+  // is just the entire space. To avoid this trivial solution, we add the
+  // constraint that the C.row(i).sum() >= 0.001 or <= -0.001;
+  for (int i = 0; i < C_rows / 2; ++i) {
+    prog.AddLinearConstraint(Eigen::Vector2d::Ones(), 0.001, kInf, C.row(i));
+  }
+  for (int i = C_rows / 2; i < C_rows; ++i) {
+    prog.AddLinearConstraint(Eigen::Vector2d::Ones(), -kInf, -0.001, C.row(i));
+  }
+  const auto result = solvers::Solve(prog);
+  EXPECT_TRUE(result.is_success());
+  const auto C_val = result.GetSolution(C);
+  const auto d_val = result.GetSolution(d);
+  // Now solve a program
+  // min |Py+q-x|
+  // s.t C_val.row(i) * x >= d_val(i)
+  //     |y|₂ <= 1
+  // Namely we find the minimal distance between the ellipsoid and the outside
+  // hafplane of C_val.row(i) * x >= d_val(i). This distance should be at least
+  // min_margin.
+  for (int i = 0; i < C.rows(); ++i) {
+    solvers::MathematicalProgram prog_check;
+    auto x = prog_check.NewContinuousVariables<2>();
+    auto y = prog_check.NewContinuousVariables<2>();
+    // Add the constraint that [1, y] is in the lorentz cone.
+    const Vector3<symbolic::Expression> lorentz_cone_expr1(1, y(0), y(1));
+    prog_check.AddLorentzConeConstraint(lorentz_cone_expr1);
+    prog_check.AddLinearConstraint(C_val.row(i), d_val(i), kInf, x);
+    // Now add the slack variable s with the constraint [s, Py+q-x] is in the
+    // Lorentz cone.
+    const auto s = prog_check.NewContinuousVariables<1>()(0);
+    Vector3<symbolic::Expression> lorentz_cone_expr2;
+    lorentz_cone_expr2(0) = s;
+    lorentz_cone_expr2.tail<2>() = P * y + q - x;
+    prog_check.AddLorentzConeConstraint(lorentz_cone_expr2);
+    prog_check.AddLinearCost(s);
+    const auto result_check = solvers::Solve(prog_check);
+    EXPECT_TRUE(result_check.is_success());
+    EXPECT_GE(result_check.get_optimal_cost(), min_margin(i) - 1E-6);
+  }
 }
 }  // namespace multibody
 }  // namespace drake

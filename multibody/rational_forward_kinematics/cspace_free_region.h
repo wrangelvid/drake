@@ -191,8 +191,9 @@ class CspaceFreeRegion {
   bool IsPostureInCollision(const systems::Context<double>& context) const;
 
   /** Each tuple corresponds to one rational aᵀx + b - 1 or -1 - aᵀx - b.
-   * This tuple should be used with GenerateTupleForBilinearAlternation. To save
-   * computation time, this class minimizes using dynamic memory allocation.
+   * This tuple should be used with GenerateTuplesForBilinearAlternation. To
+   * save computation time, this class minimizes using dynamic memory
+   * allocation.
    */
   struct CspacePolytopeTuple {
     CspacePolytopeTuple(symbolic::Polynomial m_rational_numerator,
@@ -239,6 +240,10 @@ class CspaceFreeRegion {
   /** Generate the tuples for bilinear alternation.
    * @param[out] d_minus_Ct Both C and d are decision variables in d_minus_Ct
    * (instead of fixed double values).
+   * @param[out] t_lower Lower bounds on t computed from joint limits.
+   * @param[out] t_upper Upper bounds on t computed from joint limits.
+   * @param[out] t_minus_t_lower t - t_lower
+   * @param[out] t_upper_minus_t t_upper - t
    * @param[out] lagrangian_gram_vars All of the variables in the Gram matrices
    * for all Lagrangian polynomials.
    * @param[out] verified_gram_vars All of the variables in the verified
@@ -251,8 +256,10 @@ class CspaceFreeRegion {
       const Eigen::Ref<const Eigen::VectorXd>& q_star,
       const FilteredCollisionPairs& filtered_collision_pairs, int C_rows,
       std::vector<CspacePolytopeTuple>* alternation_tuples,
-      VectorX<symbolic::Polynomial>* d_minus_Ct, MatrixX<symbolic::Variable>* C,
-      VectorX<symbolic::Variable>* d,
+      VectorX<symbolic::Polynomial>* d_minus_Ct, Eigen::VectorXd* t_lower,
+      Eigen::VectorXd* t_upper, VectorX<symbolic::Polynomial>* t_minus_t_lower,
+      VectorX<symbolic::Polynomial>* t_upper_minus_t,
+      MatrixX<symbolic::Variable>* C, VectorX<symbolic::Variable>* d,
       VectorX<symbolic::Variable>* lagrangian_gram_vars,
       VectorX<symbolic::Variable>* verified_gram_vars,
       VectorX<symbolic::Variable>* separating_plane_vars) const;
@@ -261,8 +268,9 @@ class CspaceFreeRegion {
    * Given the C-space free region candidate C*t<=d,
    * construct an optimization program with the constraint
    * p(t) - l_polytope(t).dot(d - C*t) - l_lower(t).dot(t - t_lower) -
-   * l_upper(t).dot(t_upper-t) >= 0 l_polytope(t)>=0, l_lower(t)>=0,
-   * l_upper(t)>=0 P is psd |cᵢᵀP|₂ ≤ dᵢ−cᵢᵀq The unknowns are the separating
+   * l_upper(t).dot(t_upper-t) >= 0
+   * l_polytope(t)>=0, l_lower(t)>=0, l_upper(t)>=0
+   * |cᵢᵀP|₂ ≤ dᵢ−cᵢᵀq The unknowns are the separating
    * plane parameters (a, b), the lagrangian multipliers l_polytope(t),
    * l_lower(t), l_upper(t), the inscribed ellipsoid parameter P, q
    * @param alternation_tuples computed from
@@ -292,6 +300,52 @@ class CspaceFreeRegion {
       const Eigen::Ref<const Eigen::VectorXd>& t_upper,
       const VerificationOption& option, MatrixX<symbolic::Variable>* P,
       VectorX<symbolic::Variable>* q) const;
+
+  /**
+   * Given lagrangian polynomials, construct an optimization program to search
+   * for the separating plane, the C-space polytope C*t<=d.
+   * The goal is to find the polytope C*t<=d that contains the ellipsoid {Py+q|
+   * |y|₂≤1} with the maximal margin between the polytope and the ellipsoid.
+   * Mathematically the optimization program is
+   * p(t) - l_polytope(t).dot(d - C*t) - l_lower(t).dot(t - t_lower) -
+   * l_upper(t).dot(t_upper-t) >= 0
+   * |cᵢᵀP| ≤ dᵢ − cᵢᵀq − δᵢ
+   * |cᵢ|₂ ≤ 1
+   * where δ is the margin between the polytope and the ellipsoid. cᵢᵀ is the
+   * i'th row of C.
+   * @note The constructed program doesn't have a cost yet.
+   * @param alternation_tuples Returned from
+   * GenerateTuplesForBilinearAlternation.
+   * @parm C Returned from GenerateTuplesForBilinearAlternation.
+   * @parm d Returned from GenerateTuplesForBilinearAlternation.
+   * @parm d_minus_Ct Returned from GenerateTuplesForBilinearAlternation. d - C
+   * * t.
+   * @param lagrangian_gram_var_vals The value for all the lagrangian gram
+   * variables.
+   * @param verified_gram_vars Returned from
+   * GenerateTuplesForBilinearAlternation.
+   * @param separating_plane_vars Returned from
+   * GenerateTuplesForBilinearAlternation.
+   * @param t_minus_t_lower t - t_lower
+   * @param t_upper_minus_t t_upper - t
+   * @param P The parameter for the inscribed ellipsoid. This P should be a
+   * symmetric matrix.
+   * @param q The parameter for the ellipsoid.
+   * @param[out] margin δ in the documentation above.
+   */
+  std::unique_ptr<solvers::MathematicalProgram> ConstructPolytopeProgram(
+      const std::vector<CspacePolytopeTuple>& alternation_tuples,
+      const MatrixX<symbolic::Variable>& C,
+      const VectorX<symbolic::Variable>& d,
+      const VectorX<symbolic::Polynomial>& d_minus_Ct,
+      const Eigen::VectorXd& lagrangian_gram_var_vals,
+      const VectorX<symbolic::Variable>& verified_gram_vars,
+      const VectorX<symbolic::Variable>& separating_plane_vars,
+      const VectorX<symbolic::Polynomial>& t_minus_t_lower,
+      const VectorX<symbolic::Polynomial>& t_upper_minus_t,
+      const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
+      const VerificationOption& option,
+      VectorX<symbolic::Variable>* margin) const;
 
   const RationalForwardKinematics& rational_forward_kinematics() const {
     return rational_forward_kinematics_;
@@ -436,5 +490,25 @@ void AddInscribedEllipsoid(
     const Eigen::Ref<const MatrixX<symbolic::Variable>>& P,
     const Eigen::Ref<const VectorX<symbolic::Variable>>& q,
     bool constrain_P_psd = true);
+
+/**
+ * Add the constraint such that the ellipsoid {Py+q | |y|₂≤ 1} is contained
+ * within the polytope C * t <=d with a margin no smaller than δ.
+ * Mathematically the constraint is
+ * |cᵢᵀP|₂ ≤ dᵢ − cᵢᵀq − δᵢ
+ * |cᵢᵀ|₂ ≤ 1
+ * where cᵢᵀ is the i'th row of C.
+ * @param C This should have registered as decision variable in prog.
+ * @param d This should have registered as decision variable in prog.
+ * @param margin δ in the documentation above. This should have registered as
+ * decision variable in prog.
+ */
+void AddOuterPolytope(
+    solvers::MathematicalProgram* prog,
+    const Eigen::Ref<const Eigen::MatrixXd>& P,
+    const Eigen::Ref<const Eigen::VectorXd>& q,
+    const Eigen::Ref<const MatrixX<symbolic::Variable>>& C,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& d,
+    const Eigen::Ref<const VectorX<symbolic::Variable>>& margin);
 }  // namespace multibody
 }  // namespace drake
