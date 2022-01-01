@@ -820,6 +820,122 @@ CspaceFreeRegion::ConstructPolytopeProgram(
   return prog;
 }
 
+void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
+    const Eigen::Ref<const Eigen::VectorXd>& q_star,
+    const CspaceFreeRegion::FilteredCollisionPairs& filtered_collision_pairs,
+    const Eigen::Ref<const Eigen::MatrixXd>& C_init,
+    const Eigen::Ref<const Eigen::VectorXd>& d_init,
+    const CspaceFreeRegion::BilinearAlternationOption&
+        bilinear_alternation_option,
+    const solvers::SolverOptions& solver_options, Eigen::MatrixXd* C_final,
+    Eigen::VectorXd* d_final, Eigen::MatrixXd* P_final,
+    Eigen::VectorXd* q_final) const {
+  const int C_rows = C_init.rows();
+  DRAKE_DEMAND(d_init.rows() == C_rows);
+  DRAKE_DEMAND(C_init.cols() == rational_forward_kinematics_.t().rows());
+  // First normalize each row of C and d, such that each row of C has a unit
+  // norm. This is important as later when we search for polytope, we impose the
+  // constraint |C.row(i)|<=1, hence we need to first start with C and d
+  // satisfying this constraint.
+  Eigen::MatrixXd C_val = C_init;
+  Eigen::VectorXd d_val = d_init;
+  for (int i = 0; i < C_rows; ++i) {
+    const double C_row_norm = C_val.row(i).norm();
+    C_val.row(i) /= C_row_norm;
+    d_val(i) /= C_row_norm;
+  }
+  std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
+  VectorX<symbolic::Polynomial> d_minus_Ct;
+  Eigen::VectorXd t_lower, t_upper;
+  VectorX<symbolic::Polynomial> t_minus_t_lower, t_upper_minus_t;
+  MatrixX<symbolic::Variable> C_var;
+  VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
+      separating_plane_vars;
+  GenerateTuplesForBilinearAlternation(
+      q_star, filtered_collision_pairs, C_rows, &alternation_tuples,
+      &d_minus_Ct, &t_lower, &t_upper, &t_minus_t_lower, &t_upper_minus_t,
+      &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
+      &separating_plane_vars);
+
+  MatrixX<symbolic::Variable> P;
+  VectorX<symbolic::Variable> q;
+  VectorX<symbolic::Variable> margin;
+  int iter_count = 0;
+  double cost_improvement = kInf;
+  double previous_cost = -kInf;
+  VerificationOption verification_option{};
+  while (iter_count < bilinear_alternation_option.num_iters &&
+         cost_improvement > bilinear_alternation_option.convergence_tol) {
+    auto prog_lagrangian = ConstructLagrangianProgram(
+        alternation_tuples, C_val, d_val, lagrangian_gram_vars,
+        verified_gram_vars, separating_plane_vars, t_lower, t_upper,
+        verification_option, &P, &q);
+    prog_lagrangian->AddMaximizeLogDeterminantSymmetricMatrixCost(
+        P.cast<symbolic::Expression>());
+    const auto result_lagrangian =
+        solvers::Solve(*prog_lagrangian, std::nullopt, solver_options);
+    if (!result_lagrangian.is_success()) {
+      throw std::runtime_error(
+          fmt::format("Find Lagrangian fails in iter {}", iter_count));
+    }
+    if (bilinear_alternation_option.verbose) {
+      std::cout << fmt::format("Iter: {}, max(log(det(P)))={}\n", iter_count,
+                               -result_lagrangian.get_optimal_cost());
+    }
+    // TODO(hongkai.dai): backoff the lagrangian step result.
+    const Eigen::VectorXd lagrangian_gram_var_vals =
+        result_lagrangian.GetSolution(lagrangian_gram_vars);
+    const auto P_sol = result_lagrangian.GetSolution(P);
+    const auto q_sol = result_lagrangian.GetSolution(q);
+    *P_final = P_sol;
+    *q_final = q_sol;
+    // Update the cost.
+    const double log_det_P = std::log(P_sol.determinant());
+    cost_improvement = log_det_P - previous_cost;
+    previous_cost = log_det_P;
+
+    // Now solve the polytope problem (fix Lagrangian).
+    auto prog_polytope = ConstructPolytopeProgram(
+        alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
+        verified_gram_vars, separating_plane_vars, t_minus_t_lower,
+        t_upper_minus_t, P_sol, q_sol, verification_option, &margin);
+    auto prog_polytope_cost = prog_polytope->AddLinearCost(
+        -Eigen::VectorXd::Ones(margin.rows()), 0., margin);
+    auto result_polytope =
+        solvers::Solve(*prog_polytope, std::nullopt, solver_options);
+    if (!result_polytope.is_success()) {
+      throw std::runtime_error(fmt::format(
+          "Failed to find the polytope at iteration {}", iter_count));
+    }
+
+    if (bilinear_alternation_option.verbose) {
+      std::cout << fmt::format("Iter: {}, polytope step cost {}\n", iter_count,
+                               result_polytope.get_optimal_cost());
+    }
+    if (bilinear_alternation_option.backoff_scale > 0) {
+      const auto margin_sum_max = -result_polytope.get_optimal_cost();
+      prog_polytope->RemoveCost(prog_polytope_cost);
+      // Now add the constraint margin.sum() >= (1-backoff_scale) *
+      // margin_sum_max.
+      prog_polytope->AddLinearConstraint(
+          Eigen::VectorXd::Ones(margin.rows()),
+          (1 - bilinear_alternation_option.backoff_scale) * margin_sum_max,
+          kInf, margin);
+      result_polytope =
+          solvers::Solve(*prog_polytope, std::nullopt, solver_options);
+      if (!result_polytope.is_success()) {
+        throw std::runtime_error(fmt::format(
+            "Failed to backoff polytope program in iteration {}", iter_count));
+      }
+    }
+    C_val = result_polytope.GetSolution(C_var);
+    d_val = result_polytope.GetSolution(d_var);
+    *C_final = C_val;
+    *d_final = d_val;
+    iter_count += 1;
+  }
+}
+
 std::vector<LinkVertexOnPlaneSideRational>
 GenerateLinkOnOneSideOfPlaneRationalFunction(
     const RationalForwardKinematics& rational_forward_kinematics,

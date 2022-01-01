@@ -347,6 +347,49 @@ class CspaceFreeRegion {
       const VerificationOption& option,
       VectorX<symbolic::Variable>* margin) const;
 
+  struct BilinearAlternationOption {
+    /** Number of iterations. One lagrangian step + one polytope step is counted
+     * as one iteration (namely we solve two SOS programs in one iteration).
+     */
+    int num_iters{10};
+    /** When the increase of the lagrangian step (log(det(P)) which measures the
+     * inscribed ellipsoid volume) is smaller than this tolerance, stop the
+     * alternation.
+     */
+    double convergence_tol{0.001};
+    /** Backoff the optimization program to search for a strictly feasible
+     * solution not on the boundary of the feasible region. backoff_scale = 0
+     * means no backoff, backoff_scale should be a non-negative number.
+     */
+    double backoff_scale{0.};
+    int verbose{true};
+  };
+
+  /**
+   * Search the C-splace polytopic free region
+   * C * t <= d
+   * t_lower <= t <= t_upper
+   * through bilinear alternation.
+   * t_lower/t_upper ar the lower and upper bounds of t computed from joint
+   * limits.
+   * @param q_star t = tan((q - q_star)/2)
+   * @param[out] C_final At termination, the free polytope is C_final * t <=
+   * d_final.
+   * @param[out] d_final At termination, the free polytope is C_final * t <=
+   * d_final.
+   * @param[out] P_final The inscribed ellipsoid if {P_final*y+q_final | |y|₂≤1}
+   * @param[out] q_final The inscribed ellipsoid if {P_final*y+q_final | |y|₂≤1}
+   */
+  void CspacePolytopeBilinearAlternation(
+      const Eigen::Ref<const Eigen::VectorXd>& q_star,
+      const FilteredCollisionPairs& filtered_collision_pairs,
+      const Eigen::Ref<const Eigen::MatrixXd>& C_init,
+      const Eigen::Ref<const Eigen::VectorXd>& d_init,
+      const BilinearAlternationOption& bilinear_alternation_option,
+      const solvers::SolverOptions& solver_options, Eigen::MatrixXd* C_final,
+      Eigen::VectorXd* d_final, Eigen::MatrixXd* P_final,
+      Eigen::VectorXd* q_final) const;
+
   const RationalForwardKinematics& rational_forward_kinematics() const {
     return rational_forward_kinematics_;
   }
