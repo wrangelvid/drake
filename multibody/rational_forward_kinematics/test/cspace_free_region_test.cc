@@ -825,7 +825,7 @@ TEST_F(IiwaCspaceTest, CspacePolytopeBilinearAlternation) {
   Eigen::MatrixXd P_final;
   Eigen::VectorXd q_final;
   const CspaceFreeRegion::BilinearAlternationOption
-      bilinear_alternation_options{.num_iters = 3,
+      bilinear_alternation_options{.max_iters = 3,
                                    .convergence_tol = 0.001,
                                    .backoff_scale = 0.05,
                                    .verbose = true};
@@ -834,6 +834,36 @@ TEST_F(IiwaCspaceTest, CspacePolytopeBilinearAlternation) {
   dut.CspacePolytopeBilinearAlternation(
       q_star, filtered_collision_pairs, C, d, bilinear_alternation_options,
       solver_options, &C_final, &d_final, &P_final, &q_final);
+}
+
+TEST_F(IiwaCspaceTest, CspacePolytopeBinarySearch) {
+  const CspaceFreeRegion dut(*iiwa_, {link7_polytopes_[0].get()},
+                             {obstacles_[0].get(), obstacles_[1].get()},
+                             SeparatingPlaneOrder::kAffine,
+                             CspaceRegionType::kGenericPolytope);
+  const auto& plant = dut.rational_forward_kinematics().plant();
+  auto context = plant.CreateDefaultContext();
+
+  Eigen::VectorXd q_star;
+  Eigen::MatrixXd C;
+  Eigen::VectorXd d;
+  ConstructInitialCspacePolytope(dut, &q_star, &C, &d);
+
+  CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
+  // Intentially multiplies a factor to make the rows of C unnormalized.
+  C.row(0) = 2 * C.row(0);
+  d(0) = 2 * d(0);
+  C.row(1) = 3 * C.row(1);
+  d(1) = 3 * d(1);
+
+  CspaceFreeRegion::BinarySearchOption binary_search_option{
+      .epsilon_max = 1, .epsilon_min = 0.1, .epsilon_tol = 0.1};
+  solvers::SolverOptions solver_options;
+  solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, true);
+  Eigen::VectorXd d_final;
+  dut.CspacePolytopeBinarySearch(q_star, filtered_collision_pairs, C, d,
+                                 binary_search_option, solver_options,
+                                 &d_final);
 }
 
 GTEST_TEST(CalcPolynomialFromGram, Test1) {

@@ -864,7 +864,7 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
   double cost_improvement = kInf;
   double previous_cost = -kInf;
   VerificationOption verification_option{};
-  while (iter_count < bilinear_alternation_option.num_iters &&
+  while (iter_count < bilinear_alternation_option.max_iters &&
          cost_improvement > bilinear_alternation_option.convergence_tol) {
     auto prog_lagrangian = ConstructLagrangianProgram(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
@@ -933,6 +933,83 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     *C_final = C_val;
     *d_final = d_val;
     iter_count += 1;
+  }
+}
+
+void CspaceFreeRegion::CspacePolytopeBinarySearch(
+    const Eigen::Ref<const Eigen::VectorXd>& q_star,
+    const FilteredCollisionPairs& filtered_collision_pairs,
+    const Eigen::Ref<const Eigen::MatrixXd>& C,
+    const Eigen::Ref<const Eigen::VectorXd>& d_init,
+    const BinarySearchOption& binary_search_option,
+    const solvers::SolverOptions& solver_options,
+    Eigen::VectorXd* d_final) const {
+  const int C_rows = C.rows();
+  DRAKE_DEMAND(d_init.rows() == C_rows);
+  DRAKE_DEMAND(C.cols() == rational_forward_kinematics_.t().rows());
+  std::vector<CspaceFreeRegion::CspacePolytopeTuple> alternation_tuples;
+  VectorX<symbolic::Polynomial> d_minus_Ct;
+  Eigen::VectorXd t_lower, t_upper;
+  VectorX<symbolic::Polynomial> t_minus_t_lower, t_upper_minus_t;
+  MatrixX<symbolic::Variable> C_var;
+  VectorX<symbolic::Variable> d_var, lagrangian_gram_vars, verified_gram_vars,
+      separating_plane_vars;
+  GenerateTuplesForBilinearAlternation(
+      q_star, filtered_collision_pairs, C_rows, &alternation_tuples,
+      &d_minus_Ct, &t_lower, &t_upper, &t_minus_t_lower, &t_upper_minus_t,
+      &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
+      &separating_plane_vars);
+
+  VerificationOption verification_option{};
+  // Checks if C*t<=d, t_lower<=t<=t_upper is collision free.
+  auto is_polytope_collision_free =
+      [this, &alternation_tuples, &C, &lagrangian_gram_vars,
+       &verified_gram_vars, &separating_plane_vars, &t_lower, &t_upper,
+       &verification_option, &solver_options](const Eigen::VectorXd& d) {
+        auto prog = this->ConstructLagrangianProgram(
+            alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
+            separating_plane_vars, t_lower, t_upper, verification_option,
+            nullptr, nullptr);
+        // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
+        // empty. We find t_nominal satisfying these constraints.
+        const auto t_nominal = prog->NewContinuousVariables(
+            rational_forward_kinematics_.t().rows());
+        prog->AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf),
+                                  d, t_nominal);
+        prog->AddBoundingBoxConstraint(t_lower, t_upper, t_nominal);
+
+        const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+        return result.is_success();
+      };
+  if (is_polytope_collision_free(d_init +
+                                 binary_search_option.epsilon_max *
+                                     Eigen::VectorXd::Ones(d_init.rows()))) {
+    *d_final = d_init + binary_search_option.epsilon_max *
+                            Eigen::VectorXd::Ones(d_init.rows());
+    return;
+  }
+  if (!is_polytope_collision_free(d_init +
+                                  binary_search_option.epsilon_min *
+                                      Eigen::VectorXd::Ones(d_init.rows()))) {
+    throw std::runtime_error(
+        fmt::format("binary search: the initial epsilon {} is infeasible",
+                    binary_search_option.epsilon_min));
+  }
+  double eps_max = binary_search_option.epsilon_max;
+  double eps_min = binary_search_option.epsilon_min;
+  while (eps_max - eps_min > binary_search_option.epsilon_tol) {
+    const double eps = (eps_max + eps_min) / 2;
+    const Eigen::VectorXd d =
+        d_init + eps * Eigen::VectorXd::Ones(d_init.rows());
+    const bool is_feasible = is_polytope_collision_free(d);
+    if (is_feasible) {
+      std::cout << fmt::format("epsilon={} is feasible\n", eps);
+      eps_min = eps;
+    } else {
+      std::cout << fmt::format("epsilon={} is infeasible\n", eps);
+      eps_max = eps;
+    }
+    *d_final = d;
   }
 }
 

@@ -351,7 +351,7 @@ class CspaceFreeRegion {
     /** Number of iterations. One lagrangian step + one polytope step is counted
      * as one iteration (namely we solve two SOS programs in one iteration).
      */
-    int num_iters{10};
+    int max_iters{10};
     /** When the increase of the lagrangian step (log(det(P)) which measures the
      * inscribed ellipsoid volume) is smaller than this tolerance, stop the
      * alternation.
@@ -389,6 +389,30 @@ class CspaceFreeRegion {
       const solvers::SolverOptions& solver_options, Eigen::MatrixXd* C_final,
       Eigen::VectorXd* d_final, Eigen::MatrixXd* P_final,
       Eigen::VectorXd* q_final) const;
+
+  struct BinarySearchOption {
+    double epsilon_max{10};
+    double epsilon_min{0};
+    double epsilon_tol{1E-3};
+  };
+
+  /**
+   * Find the C-space free polytope C*t<=d through binary search.
+   * In each iteration we check if this polytope
+   * C*t <= d + ε
+   * t_lower <= t <= t_upper
+   * is collision free, and do a binary search on ε.
+   * where t = tan((q - q_star)/2), t_lower and t_upper are computed from robot
+   * joint limits.
+   */
+  void CspacePolytopeBinarySearch(
+      const Eigen::Ref<const Eigen::VectorXd>& q_star,
+      const FilteredCollisionPairs& filtered_collision_pairs,
+      const Eigen::Ref<const Eigen::MatrixXd>& C,
+      const Eigen::Ref<const Eigen::VectorXd>& d_init,
+      const BinarySearchOption& binary_search_option,
+      const solvers::SolverOptions& solver_options,
+      Eigen::VectorXd* d_final) const;
 
   const RationalForwardKinematics& rational_forward_kinematics() const {
     return rational_forward_kinematics_;
