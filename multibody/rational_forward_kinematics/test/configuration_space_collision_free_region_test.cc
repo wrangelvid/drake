@@ -8,6 +8,7 @@
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/symbolic_test_util.h"
 #include "drake/multibody/inverse_kinematics/inverse_kinematics.h"
+#include "drake/multibody/plant/coulomb_friction.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
 #include "drake/multibody/rational_forward_kinematics/test/rational_forward_kinematics_test_utilities.h"
 #include "drake/solvers/common_solver_option.h"
@@ -125,19 +126,28 @@ void CheckGenerateLinkOnOneSideOfPlaneRationalFunction(
 }
 
 TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction1) {
-  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
-
+  geometry::SceneGraph<double> sg;
+  iiwa_->RegisterAsSourceForSceneGraph(&sg);
   // Arbitrary pose between link polytope and the attached link.
   const RigidTransformd X_6V{
       RotationMatrixd(Eigen::AngleAxisd(
           0.2 * M_PI, Eigen::Vector3d(0.1, 0.4, 0.3).normalized())),
       {0.2, -0.1, 0.3}};
   const auto p_6V = GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.3), X_6V);
+  const auto link6_box_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->get_body(iiwa_link_[6]), X_6V, geometry::Box(0.1, 0.2, 0.3),
+      "link6_box", CoulombFriction<double>());
   auto link6_polytope =
-      std::make_shared<const ConvexPolytope>(iiwa_link_[6], p_6V);
+      std::make_shared<const ConvexPolytope>(iiwa_link_[6], link6_box_id, p_6V);
 
+  const auto obstacle_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->world_body(), {}, geometry::Box(1, 1, 1), "world_box",
+      CoulombFriction<double>());
   auto obstacle = std::make_shared<const ConvexPolytope>(
-      world_, GenerateBoxVertices(Eigen::Vector3d::Ones(), {}));
+      world_, obstacle_id, GenerateBoxVertices(Eigen::Vector3d::Ones(), {}));
+  iiwa_->Finalize();
+
+  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
 
   Eigen::VectorXd q(7);
   q.setZero();
@@ -158,7 +168,8 @@ TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction1) {
 }
 
 TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction2) {
-  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
+  geometry::SceneGraph<double> sg;
+  iiwa_->RegisterAsSourceForSceneGraph(&sg);
 
   // Arbitrary pose between link polytope and the attached link.
   RigidTransformd X_3V{
@@ -166,12 +177,22 @@ TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction2) {
           0.3 * M_PI, Eigen::Vector3d(0.1, 0.4, 0.3).normalized())),
       {-0.2, -0.1, 0.3}};
   const auto p_3V = GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.3), X_3V);
-  auto link3_polytope =
-      std::make_shared<const ConvexPolytope>(iiwa_link_[3], p_3V);
+  const auto link3_polytope_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->get_body(iiwa_link_[3]), X_3V, geometry::Box(0.1, 0.2, 0.3),
+      "link3_box", CoulombFriction<double>());
+  auto link3_polytope = std::make_shared<const ConvexPolytope>(
+      iiwa_link_[3], link3_polytope_id, p_3V);
 
+  const auto obstacle_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->world_body(), {}, geometry::Box(1, 1, 1), "world_box",
+      CoulombFriction<double>{});
   auto obstacle = std::make_shared<const ConvexPolytope>(
-      world_, GenerateBoxVertices(Eigen::Vector3d::Ones(),
-                                  RigidTransformd::Identity()));
+      world_, obstacle_id,
+      GenerateBoxVertices(Eigen::Vector3d::Ones(),
+                          RigidTransformd::Identity()));
+  iiwa_->Finalize();
+
+  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
 
   Eigen::VectorXd q(7);
   q.setZero();
@@ -197,7 +218,8 @@ TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction2) {
 }
 
 TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction3) {
-  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
+  geometry::SceneGraph<double> sg;
+  iiwa_->RegisterAsSourceForSceneGraph(&sg);
 
   // Arbitrary pose between link polytope and the attached link.
   const RigidTransformd X_6V{
@@ -205,11 +227,20 @@ TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction3) {
           0.2 * M_PI, Eigen::Vector3d(0.1, 0.4, 0.3).normalized())),
       {0.2, -0.1, 0.3}};
   const auto p_6V = GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.3), X_6V);
-  auto link6_polytope =
-      std::make_shared<const ConvexPolytope>(iiwa_link_[6], p_6V);
+  const auto link6_polytope_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->get_body(iiwa_link_[6]), X_6V, geometry::Box(0.1, 0.2, 0.3),
+      "iiwa_link6_box", CoulombFriction<double>());
+  auto link6_polytope = std::make_shared<const ConvexPolytope>(
+      iiwa_link_[6], link6_polytope_id, p_6V);
 
+  const auto obstacle_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->world_body(), {}, geometry::Box(1, 1, 1), "world_box",
+      CoulombFriction<double>());
   auto obstacle = std::make_shared<const ConvexPolytope>(
-      world_, Eigen::Vector3d::Ones(), Eigen::Matrix3d::Identity());
+      world_, obstacle_id, Eigen::Vector3d::Ones(),
+      Eigen::Matrix3d::Identity());
+  iiwa_->Finalize();
+  const RationalForwardKinematics rational_forward_kinematics(*iiwa_);
 
   Eigen::VectorXd q(7);
   q.setZero();
@@ -232,29 +263,30 @@ TEST_F(IiwaTest, GenerateLinkOnOneSideOfPlaneRationalFunction3) {
 class IiwaConfigurationSpaceTest : public IiwaTest {
  public:
   IiwaConfigurationSpaceTest() {
-    // Arbitrarily add some polytopes to links
-    link7_polytopes_.emplace_back(std::make_shared<const ConvexPolytope>(
-        iiwa_link_[7],
-        GenerateBoxVertices(Eigen::Vector3d(0.1, 0.1, 0.2), {})));
+    geometry::SceneGraph<double> sg;
+    iiwa_->RegisterAsSourceForSceneGraph(&sg);
+
+    AddBox({}, Eigen::Vector3d(0.1, 0.1, 0.2), iiwa_link_[7], "link7_box1",
+           &link7_polytopes_);
     const RigidTransformd X_7P{RotationMatrixd(Eigen::AngleAxisd(
                                    0.2 * M_PI, Eigen::Vector3d::UnitX())),
                                {0.1, 0.2, -0.1}};
-    link7_polytopes_.emplace_back(std::make_shared<const ConvexPolytope>(
-        iiwa_link_[7],
-        GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.1), X_7P)));
+    AddBox(X_7P, Eigen::Vector3d(0.1, 0.2, 0.1), iiwa_link_[7], "link7_box2",
+           &link7_polytopes_);
 
     const RigidTransformd X_5P{X_7P.rotation(), {-0.2, 0.1, 0}};
-    link5_polytopes_.emplace_back(std::make_shared<const ConvexPolytope>(
-        iiwa_link_[5],
-        GenerateBoxVertices(Eigen::Vector3d(0.2, 0.1, 0.2), X_5P)));
+    AddBox(X_5P, Eigen::Vector3d(0.2, 0.1, 0.2), iiwa_link_[5], "link5_box1",
+           &link5_polytopes_);
 
     RigidTransformd X_WP = X_5P * Eigen::Translation3d(0.15, -0.1, 0.05);
-    obstacles_.emplace_back(std::make_shared<const ConvexPolytope>(
-        world_, GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.15), X_WP)));
+    AddBox(X_WP, Eigen::Vector3d(0.1, 0.2, 0.15), world_, "world_box1",
+           &obstacles_);
     X_WP = X_WP * RigidTransformd(RotationMatrixd(Eigen::AngleAxisd(
                       -0.1 * M_PI, Eigen::Vector3d::UnitY())));
-    obstacles_.emplace_back(std::make_shared<const ConvexPolytope>(
-        world_, GenerateBoxVertices(Eigen::Vector3d(0.1, 0.25, 0.15), X_WP)));
+    AddBox(X_WP, Eigen::Vector3d(0.1, 0.25, 0.15), world_, "world_box2",
+           &obstacles_);
+
+    iiwa_->Finalize();
   }
 
  protected:

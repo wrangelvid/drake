@@ -180,7 +180,10 @@ ReadFilteredCollisionPairsForBoxesFromFile(const std::string& file_name,
             int id1, id2;
             std::istringstream id_line(line);
             id_line >> id1 >> id2;
-            pairs.emplace(ConvexGeometry::Id(id1), ConvexGeometry::Id(id2));
+            throw std::runtime_error(
+                "Cannot handle this. The geometry Id should be created by the "
+                "plant, not a file.");
+            // pairs.emplace(ConvexGeometry::Id(id1), ConvexGeometry::Id(id2));
           } else {
             filtered_collision_pairs_for_boxes.emplace_back(q_lower, q_upper,
                                                             pairs);

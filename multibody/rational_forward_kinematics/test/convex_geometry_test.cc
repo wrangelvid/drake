@@ -18,7 +18,8 @@ GTEST_TEST(PolytopeTest, Test) {
           0, 0, 1, 0,
           0, 0, 0, 1;
   // clang-format on
-  ConvexPolytope polytope(BodyIndex{0}, p_BV);
+  ConvexPolytope polytope(BodyIndex{0}, geometry::GeometryId::get_new_id(),
+                          p_BV);
   EXPECT_TRUE(CompareMatrices(polytope.p_BC(), Eigen::Vector3d(0, 0.25, 0.25)));
 }
 
@@ -60,8 +61,9 @@ GTEST_TEST(ConvexGeometryTest, InCollision) {
           0, 0, 1, 0,
           0, 0, 0, 1;
   // clang-format on
-  ConvexPolytope P1(BodyIndex{0}, p_BV);
-  ConvexPolytope P2(BodyIndex{1}, p_BV);
+  ConvexPolytope P1(BodyIndex{0}, geometry::GeometryId::get_new_id(), p_BV);
+  ConvexPolytope P2(BodyIndex{1}, drake::geometry::GeometryId::get_new_id(),
+                    p_BV);
 
   drake::math::RigidTransform<double> X_AP1, X_AP2;
   X_AP1.SetIdentity();
@@ -80,8 +82,9 @@ GTEST_TEST(ConvexGeometryTest, InCollision) {
               check_is_separating(P1, P2, X_AP1, X_AP2));
   }
 
-  const ConvexPolytope P3(BodyIndex(0), Eigen::Vector3d::Zero(),
-                          Eigen::Matrix3d::Identity());
+  const ConvexPolytope P3(BodyIndex(0),
+                          drake::geometry::GeometryId::get_new_id(),
+                          Eigen::Vector3d::Zero(), Eigen::Matrix3d::Identity());
   drake::math::RigidTransform<double> X_AP3;
   X_AP1.SetIdentity();
   X_AP3.SetIdentity();
@@ -150,7 +153,8 @@ class CylinderTest : public ::testing::Test {
 };
 
 TEST_F(CylinderTest, AddInsideHalfspaceConstraint) {
-  const Cylinder cylinder(BodyIndex(0), p_BO_, a_B_, radius_);
+  const Cylinder cylinder(BodyIndex(0), geometry::GeometryId::get_new_id(),
+                          p_BO_, a_B_, radius_);
   drake::solvers::MathematicalProgram prog;
   auto n_B = prog.NewContinuousVariables<3>();
   const Eigen::Vector3d p_BC = p_BO_ + 0.1 * a_B_;
@@ -203,7 +207,8 @@ TEST_F(CylinderTest, AddPointInsideGeometryConstraint) {
                       .toRotationMatrix();
   X_AB.translation() << 0.2, 0.3, 0.4;
 
-  const Cylinder cylinder(BodyIndex(0), p_BO_, a_B_, radius_);
+  const Cylinder cylinder(BodyIndex(0), geometry::GeometryId::get_new_id(),
+                          p_BO_, a_B_, radius_);
   cylinder.AddPointInsideGeometryConstraint(X_AB, p_AQ, &prog);
 
   auto is_inside_cylinder =

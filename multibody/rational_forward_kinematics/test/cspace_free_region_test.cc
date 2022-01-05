@@ -29,29 +29,30 @@ const double kInf = std::numeric_limits<double>::infinity();
 class IiwaCspaceTest : public IiwaTest {
  public:
   IiwaCspaceTest() {
+    geometry::SceneGraph<double> sg;
+    iiwa_->RegisterAsSourceForSceneGraph(&sg);
     // Arbitrarily add some polytopes to links
-    link7_polytopes_.emplace_back(new const ConvexPolytope(
-        iiwa_link_[7],
-        GenerateBoxVertices(Eigen::Vector3d(0.1, 0.1, 0.2), {})));
+    AddBox({}, Eigen::Vector3d(0.1, 0.1, 0.2), iiwa_link_[7], "link7_box1",
+           &link7_polytopes_);
     const RigidTransformd X_7P{RotationMatrixd(Eigen::AngleAxisd(
                                    0.2 * M_PI, Eigen::Vector3d::UnitX())),
                                {0.1, 0.2, -0.1}};
-    link7_polytopes_.emplace_back(new const ConvexPolytope(
-        iiwa_link_[7],
-        GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.1), X_7P)));
+    AddBox(X_7P, Eigen::Vector3d(0.1, 0.2, 0.1), iiwa_link_[7], "link7_box2",
+           &link7_polytopes_);
 
     const RigidTransformd X_5P{X_7P.rotation(), {-0.2, 0.1, 0}};
-    link5_polytopes_.emplace_back(new const ConvexPolytope(
-        iiwa_link_[5],
-        GenerateBoxVertices(Eigen::Vector3d(0.2, 0.1, 0.2), X_5P)));
+    AddBox(X_5P, Eigen::Vector3d(0.2, 0.1, 0.2), iiwa_link_[5], "link5_box1",
+           &link5_polytopes_);
 
     RigidTransformd X_WP = X_5P * Eigen::Translation3d(0.15, -0.1, 0.05);
-    obstacles_.emplace_back(new const ConvexPolytope(
-        world_, GenerateBoxVertices(Eigen::Vector3d(0.1, 0.2, 0.15), X_WP)));
+    AddBox(X_WP, Eigen::Vector3d(0.1, 0.2, 0.15), world_, "world_box1",
+           &obstacles_);
     X_WP = X_WP * RigidTransformd(RotationMatrixd(Eigen::AngleAxisd(
                       -0.1 * M_PI, Eigen::Vector3d::UnitY())));
-    obstacles_.emplace_back(new const ConvexPolytope(
-        world_, GenerateBoxVertices(Eigen::Vector3d(0.1, 0.25, 0.15), X_WP)));
+    AddBox(X_WP, Eigen::Vector3d(0.1, 0.25, 0.15), world_, "world_box2",
+           &obstacles_);
+
+    iiwa_->Finalize();
   }
 
  protected:

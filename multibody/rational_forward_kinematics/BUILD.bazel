@@ -73,6 +73,7 @@ drake_cc_library(
     hdrs = ["convex_geometry.h"],
     deps = [
         ":plane_side",
+        "//geometry:geometry_ids",
         "//multibody/tree",
         "//solvers:mathematical_program",
         "//solvers:solve",
@@ -83,7 +84,6 @@ drake_cc_library(
     name = "cspace_free_region",
     srcs = [
         "cspace_free_region.cc",
-        #"filtered_collision_pairs2.cc",
     ],
     hdrs = [
         "cspace_free_region.h",

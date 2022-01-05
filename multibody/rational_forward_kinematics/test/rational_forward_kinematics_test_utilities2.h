@@ -18,13 +18,10 @@ namespace drake {
 namespace multibody {
 
 std::unique_ptr<drake::multibody::MultibodyPlant<double>> ConstructIiwaPlant(
-    const std::string& iiwa_sdf_name);
+    const std::string& iiwa_sdf_name, bool finalize);
 
 Eigen::Matrix<double, 3, 8> GenerateBoxVertices(
     const Eigen::Vector3d& size, const drake::math::RigidTransformd& pose);
-
-std::vector<std::unique_ptr<const ConvexPolytope>> GenerateIiwaLinkPolytopes(
-    const drake::multibody::MultibodyPlant<double>& iiwa);
 
 std::unique_ptr<drake::multibody::MultibodyPlant<double>>
 ConstructDualArmIiwaPlant(
@@ -36,6 +33,11 @@ ConstructDualArmIiwaPlant(
 class IiwaTest : public ::testing::Test {
  public:
   IiwaTest();
+
+  void AddBox(const math::RigidTransform<double>& X_BG,
+              const Eigen::Vector3d& box_size, BodyIndex body_index,
+              const std::string& name,
+              std::vector<std::unique_ptr<const ConvexPolytope>>* geometries);
 
  protected:
   std::unique_ptr<drake::multibody::MultibodyPlant<double>> iiwa_;

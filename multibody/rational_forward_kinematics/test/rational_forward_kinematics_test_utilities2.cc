@@ -26,7 +26,7 @@ using drake::multibody::Parser;
 const double kInf = std::numeric_limits<double>::infinity();
 
 std::unique_ptr<MultibodyPlant<double>> ConstructIiwaPlant(
-    const std::string& iiwa_sdf_name) {
+    const std::string& iiwa_sdf_name, bool finalize) {
   const std::string file_path =
       "drake/manipulation/models/iiwa_description/sdf/" + iiwa_sdf_name;
 
@@ -34,7 +34,9 @@ std::unique_ptr<MultibodyPlant<double>> ConstructIiwaPlant(
   Parser parser(plant.get());
   parser.AddModelFromFile(drake::FindResourceOrThrow(file_path));
   plant->WeldFrames(plant->world_frame(), plant->GetFrameByName("iiwa_link_0"));
-  plant->Finalize();
+  if (finalize) {
+    plant->Finalize();
+  }
   return plant;
 }
 
@@ -54,18 +56,6 @@ Eigen::Matrix<double, 3, 8> GenerateBoxVertices(const Eigen::Vector3d& size,
              pose.translation() * Eigen::Matrix<double, 1, 8>::Ones();
 
   return vertices;
-}
-
-std::vector<std::unique_ptr<const ConvexPolytope>> GenerateIiwaLinkPolytopes(
-    const MultibodyPlant<double>& iiwa) {
-  std::vector<std::unique_ptr<const ConvexPolytope>> link_polytopes;
-  const BodyIndex link7_idx = iiwa.GetBodyByName("iiwa_link_7").index();
-  RigidTransformd link7_box_pose = Eigen::Translation3d(0, 0, 0.05);
-  Eigen::Matrix<double, 3, 8> link7_pts =
-      GenerateBoxVertices(Eigen::Vector3d(0.04, 0.14, 0.1), link7_box_pose);
-  link_polytopes.push_back(
-      std::make_unique<const ConvexPolytope>(link7_idx, link7_pts));
-  return link_polytopes;
 }
 
 std::unique_ptr<MultibodyPlant<double>> ConstructDualArmIiwaPlant(
@@ -94,7 +84,7 @@ std::unique_ptr<MultibodyPlant<double>> ConstructDualArmIiwaPlant(
 }
 
 IiwaTest::IiwaTest()
-    : iiwa_(ConstructIiwaPlant("iiwa14_no_collision.sdf")),
+    : iiwa_(ConstructIiwaPlant("iiwa14_no_collision.sdf", false)),
       iiwa_tree_(drake::multibody::internal::GetInternalTree(*iiwa_)),
       world_{iiwa_->world_body().index()} {
   for (int i = 0; i < 8; ++i) {
@@ -104,6 +94,18 @@ IiwaTest::IiwaTest()
         iiwa_tree_.get_topology().get_body(iiwa_link_[i]).inboard_mobilizer;
   }
 }
+
+void IiwaTest::AddBox(
+    const math::RigidTransform<double>& X_BG, const Eigen::Vector3d& box_size,
+    BodyIndex body_index, const std::string& name,
+    std::vector<std::unique_ptr<const ConvexPolytope>>* geometries) {
+  const auto geometry_id = iiwa_->RegisterCollisionGeometry(
+      iiwa_->get_body(body_index), X_BG,
+      geometry::Box(box_size(0), box_size(1), box_size(2)), name,
+      CoulombFriction<double>());
+  geometries->emplace_back(std::make_unique<const ConvexPolytope>(
+      body_index, geometry_id, GenerateBoxVertices(box_size, X_BG)));
+};
 
 void AddIiwaWithSchunk(const RigidTransformd& X_7S,
                        MultibodyPlant<double>* plant) {

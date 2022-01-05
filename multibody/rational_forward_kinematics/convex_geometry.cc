@@ -16,13 +16,9 @@ const double kInf = std::numeric_limits<double>::infinity();
 using drake::Vector3;
 using drake::multibody::BodyIndex;
 
-ConvexGeometry::Id ConvexGeometry::get_next_id() {
-  static drake::never_destroyed<atomic<ConvexGeometry::Id>> next_id(1);
-  return next_id.access()++;
-}
-
-ConvexGeometry::ConvexGeometry(ConvexGeometryType type, BodyIndex body_index)
-    : type_{type}, body_index_{body_index}, id_{get_next_id()} {}
+ConvexGeometry::ConvexGeometry(ConvexGeometryType type, BodyIndex body_index,
+                               drake::geometry::GeometryId id)
+    : type_{type}, body_index_{body_index}, id_{id} {}
 
 bool ConvexGeometry::IsInCollision(
     const ConvexGeometry& other,
@@ -38,15 +34,17 @@ bool ConvexGeometry::IsInCollision(
 }
 
 ConvexPolytope::ConvexPolytope(BodyIndex body_index,
+                               drake::geometry::GeometryId id,
                                const Eigen::Ref<const Eigen::Matrix3Xd>& p_BV)
-    : ConvexGeometry(ConvexGeometryType::kPolytope, body_index),
+    : ConvexGeometry(ConvexGeometryType::kPolytope, body_index, id),
       p_BV_{p_BV},
       p_BC_{p_BV_.rowwise().sum() / p_BV_.cols()} {}
 
 ConvexPolytope::ConvexPolytope(BodyIndex body_index,
+                               drake::geometry::GeometryId id,
                                const Eigen::Ref<const Eigen::Matrix3Xd>& p_BV,
                                const Eigen::Ref<const Eigen::Matrix3Xd>& r_B)
-    : ConvexGeometry(ConvexGeometryType::kPolytope, body_index),
+    : ConvexGeometry(ConvexGeometryType::kPolytope, body_index, id),
       p_BV_{p_BV},
       p_BC_{p_BV_.rowwise().sum() / p_BV_.cols() +
             r_B.rowwise().sum() / r_B.cols()},
@@ -90,10 +88,10 @@ void ConvexPolytope::AddPointInsideGeometryConstraint(
                                     w);
 }
 
-Cylinder::Cylinder(BodyIndex body_index,
+Cylinder::Cylinder(BodyIndex body_index, drake::geometry::GeometryId id,
                    const Eigen::Ref<const Eigen::Vector3d>& p_BO,
                    const Eigen::Ref<const Eigen::Vector3d>& a_B, double radius)
-    : ConvexGeometry(ConvexGeometryType::kCylinder, body_index),
+    : ConvexGeometry(ConvexGeometryType::kCylinder, body_index, id),
       p_BO_{p_BO},
       a_B_{a_B},
       radius_{radius},

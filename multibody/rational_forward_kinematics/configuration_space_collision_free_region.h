@@ -119,7 +119,8 @@ class ConfigurationSpaceCollisionFreeRegion {
   struct GeometryIdPairHash {
     std::size_t operator()(
         const std::pair<ConvexGeometry::Id, ConvexGeometry::Id>& p) const {
-      return p.first * 100 + p.second;
+      return std::hash<ConvexGeometry::Id>()(p.first) +
+             std::hash<ConvexGeometry::Id>()(p.second);
       // return std::hash<ConvexGeometry::Id>()(p.first * 100) +
       //       std::hash<ConvexGeometry::Id>()(p.second);
     }

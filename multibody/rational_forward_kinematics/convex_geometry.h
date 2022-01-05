@@ -1,5 +1,6 @@
 #pragma once
 
+#include "drake/geometry/geometry_ids.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/rational_forward_kinematics/plane_side.h"
 #include "drake/multibody/tree/multibody_tree_indexes.h"
@@ -15,7 +16,7 @@ enum class ConvexGeometryType {
 
 class ConvexGeometry {
  public:
-  typedef size_t Id;
+  typedef geometry::GeometryId Id;
 
   ConvexGeometryType type() const { return type_; }
 
@@ -46,7 +47,7 @@ class ConvexGeometry {
 
   virtual const Eigen::Vector3d& p_BC() const = 0;
 
-  Id get_id() const { return id_; }
+  drake::geometry::GeometryId get_id() const { return id_; }
 
   bool IsInCollision(const ConvexGeometry& other,
                      const drake::math::RigidTransform<double>& X_ASelf,
@@ -54,14 +55,14 @@ class ConvexGeometry {
 
  protected:
   ConvexGeometry(ConvexGeometryType type,
-                 drake::multibody::BodyIndex body_index);
+                 drake::multibody::BodyIndex body_index,
+                 drake::geometry::GeometryId id);
 
  private:
-  static Id get_next_id();
   const ConvexGeometryType type_;
   // The index of the body that this geometry is attached to.
   const drake::multibody::BodyIndex body_index_;
-  const Id id_;
+  const drake::geometry::GeometryId id_;
 };
 
 /**
@@ -71,9 +72,11 @@ class ConvexGeometry {
 class ConvexPolytope : public ConvexGeometry {
  public:
   ConvexPolytope(drake::multibody::BodyIndex body_index,
+                 drake::geometry::GeometryId id,
                  const Eigen::Ref<const Eigen::Matrix3Xd>& vertices);
 
   ConvexPolytope(drake::multibody::BodyIndex body_index,
+                 drake::geometry::GeometryId id,
                  const Eigen::Ref<const Eigen::Matrix3Xd>& vertices,
                  const Eigen::Ref<const Eigen::Matrix3Xd>& rays);
 
@@ -113,6 +116,7 @@ class Cylinder : public ConvexGeometry {
    * @param radius The radius of the cylinder.
    */
   Cylinder(drake::multibody::BodyIndex body_index,
+           drake::geometry::GeometryId id,
            const Eigen::Ref<const Eigen::Vector3d>& p_BO,
            const Eigen::Ref<const Eigen::Vector3d>& a_B, double radius);
 
