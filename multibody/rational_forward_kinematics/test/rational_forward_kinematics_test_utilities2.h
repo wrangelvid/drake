@@ -41,6 +41,7 @@ class IiwaTest : public ::testing::Test {
 
  protected:
   std::unique_ptr<drake::multibody::MultibodyPlant<double>> iiwa_;
+  std::unique_ptr<drake::geometry::SceneGraph<double>> scene_graph_;
   const drake::multibody::internal::MultibodyTree<double>& iiwa_tree_;
   const drake::multibody::BodyIndex world_;
   std::array<drake::multibody::BodyIndex, 8> iiwa_link_;

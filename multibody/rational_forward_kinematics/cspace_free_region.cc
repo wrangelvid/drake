@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 
+#include "drake/geometry/optimization/vpolytope.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
 #include "drake/solvers/solve.h"
@@ -1256,6 +1257,43 @@ void AddOuterPolytope(
   b_lorentz2(0) = 1;
   for (int i = 0; i < C.rows(); ++i) {
     prog->AddLorentzConeConstraint(A_lorentz2, b_lorentz2, C.row(i));
+  }
+}
+
+void GetConvexPolytopes(
+    const systems::Diagram<double>& diagram,
+    const MultibodyPlant<double>* plant,
+    const geometry::SceneGraph<double>* scene_graph,
+    std::vector<std::unique_ptr<const ConvexPolytope>>* link_polytopes,
+    std::vector<std::unique_ptr<const ConvexPolytope>>* obstacles) {
+  // First generate the query object.
+  auto diagram_context = diagram.CreateDefaultContext();
+  diagram.Publish(*diagram_context);
+  const auto query_object =
+      scene_graph->get_query_output_port().Eval<geometry::QueryObject<double>>(
+          scene_graph->GetMyContextFromRoot(*diagram_context));
+  // Loop through each geometry in the SceneGraph.
+  const auto& inspector = scene_graph->model_inspector();
+
+  for (multibody::BodyIndex body_index{0}; body_index < plant->num_bodies();
+       ++body_index) {
+    const std::optional<geometry::FrameId> frame_id =
+        plant->GetBodyFrameIdIfExists(body_index);
+    if (frame_id.has_value()) {
+      const auto geometry_ids =
+          inspector.GetGeometries(frame_id.value(), geometry::Role::kProximity);
+      for (const auto& geometry_id : geometry_ids) {
+        const geometry::optimization::VPolytope v_polytope(
+            query_object, geometry_id, frame_id.value());
+        auto convex_polytope = std::make_unique<const ConvexPolytope>(
+            body_index, geometry_id, v_polytope.vertices());
+        if (body_index == plant->world_body().index()) {
+          obstacles->push_back(std::move(convex_polytope));
+        } else {
+          link_polytopes->push_back(std::move(convex_polytope));
+        }
+      }
+    }
   }
 }
 

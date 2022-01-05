@@ -29,8 +29,6 @@ const double kInf = std::numeric_limits<double>::infinity();
 class IiwaCspaceTest : public IiwaTest {
  public:
   IiwaCspaceTest() {
-    geometry::SceneGraph<double> sg;
-    iiwa_->RegisterAsSourceForSceneGraph(&sg);
     // Arbitrarily add some polytopes to links
     AddBox({}, Eigen::Vector3d(0.1, 0.1, 0.2), iiwa_link_[7], "link7_box1",
            &link7_polytopes_);
@@ -1073,5 +1071,73 @@ GTEST_TEST(AddOuterPolytope, Test) {
     EXPECT_GE(result_check.get_optimal_cost(), min_margin(i) - 1E-6);
   }
 }
+
+GTEST_TEST(GetConvexPolytopes, Test) {
+  systems::DiagramBuilder<double> builder;
+  auto iiwa = builder.AddSystem<MultibodyPlant<double>>(
+      ConstructIiwaPlant("iiwa14_no_collision.sdf", false));
+
+  auto sg = builder.AddSystem<geometry::SceneGraph<double>>();
+  iiwa->RegisterAsSourceForSceneGraph(sg);
+  builder.Connect(sg->get_query_output_port(),
+                  iiwa->get_geometry_query_input_port());
+  builder.Connect(iiwa->get_geometry_poses_output_port(),
+                  sg->get_source_pose_port(iiwa->get_source_id().value()));
+  // Now add the collision geometries.
+  const auto link7_box1_id = iiwa->RegisterCollisionGeometry(
+      iiwa->GetBodyByName("iiwa_link_7"), {}, geometry::Box(0.1, 0.2, 0.3),
+      "link7_box1", CoulombFriction<double>());
+  const math::RigidTransform<double> X_7P2(
+      math::RotationMatrixd(
+          Eigen::AngleAxisd(0.2, Eigen::Vector3d(0.1, 0.3, 0.5).normalized())),
+      Eigen::Vector3d(0.1, 0.5, -0.2));
+  const Eigen::Vector3d box2_size(0.2, 0.3, 0.1);
+  const auto link7_box2_id = iiwa->RegisterCollisionGeometry(
+      iiwa->GetBodyByName("iiwa_link_7"), X_7P2,
+      geometry::Box(box2_size(0), box2_size(1), box2_size(2)), "link7_box2",
+      CoulombFriction<double>());
+
+  const auto world_box_id = iiwa->RegisterCollisionGeometry(
+      iiwa->world_body(), {}, geometry::Box(0.2, 0.1, 0.3), "world_box",
+      CoulombFriction<double>());
+  iiwa->Finalize();
+  auto diagram = builder.Build();
+
+  std::vector<std::unique_ptr<const ConvexPolytope>> link_polytopes, obstacles;
+  GetConvexPolytopes(*diagram, iiwa, sg, &link_polytopes, &obstacles);
+  EXPECT_EQ(link_polytopes.size(), 2u);
+  EXPECT_EQ(obstacles.size(), 1u);
+  EXPECT_EQ(obstacles[0]->body_index(), iiwa->world_body().index());
+  EXPECT_EQ(obstacles[0]->get_id(), world_box_id);
+
+  std::unordered_map<ConvexGeometry::Id, const ConvexPolytope*>
+      link_polytope_map;
+  for (const auto& link_polytope : link_polytopes) {
+    link_polytope_map.emplace(link_polytope->get_id(), link_polytope.get());
+  }
+  EXPECT_EQ(link_polytope_map.size(), 2u);
+  const ConvexPolytope* link7_box1 = link_polytope_map.at(link7_box1_id);
+  const ConvexPolytope* link7_box2 = link_polytope_map.at(link7_box2_id);
+  EXPECT_EQ(link7_box1->body_index(),
+            iiwa->GetBodyByName("iiwa_link_7").index());
+  EXPECT_EQ(link7_box2->body_index(),
+            iiwa->GetBodyByName("iiwa_link_7").index());
+  // Now compute the geometry vertices manually and check with
+  // link7_box1->p_BV().
+  const Eigen::Matrix<double, 3, 8> link7_box2_vertices =
+      GenerateBoxVertices(box2_size, X_7P2);
+  EXPECT_EQ(link7_box2->p_BV().cols(), 8);
+  for (int i = 0; i < 8; ++i) {
+    bool found_match = false;
+    for (int j = 0; j < 8; ++j) {
+      if ((link7_box2->p_BV().col(i) - link7_box2_vertices.col(j)).norm() <
+          1E-8) {
+        found_match = true;
+      }
+    }
+    EXPECT_TRUE(found_match);
+  }
+}
+
 }  // namespace multibody
 }  // namespace drake

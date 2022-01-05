@@ -85,8 +85,10 @@ std::unique_ptr<MultibodyPlant<double>> ConstructDualArmIiwaPlant(
 
 IiwaTest::IiwaTest()
     : iiwa_(ConstructIiwaPlant("iiwa14_no_collision.sdf", false)),
+      scene_graph_{new geometry::SceneGraph<double>()},
       iiwa_tree_(drake::multibody::internal::GetInternalTree(*iiwa_)),
       world_{iiwa_->world_body().index()} {
+  iiwa_->RegisterAsSourceForSceneGraph(scene_graph_.get());
   for (int i = 0; i < 8; ++i) {
     iiwa_link_[i] =
         iiwa_->GetBodyByName("iiwa_link_" + std::to_string(i)).index();
@@ -111,7 +113,8 @@ void AddIiwaWithSchunk(const RigidTransformd& X_7S,
                        MultibodyPlant<double>* plant) {
   DRAKE_DEMAND(plant != nullptr);
   const std::string file_path =
-      "drake/manipulation/models/iiwa_description/sdf/iiwa14_no_collision.sdf";
+      "drake/manipulation/models/iiwa_description/sdf/"
+      "iiwa14_no_collision.sdf";
   Parser(plant).AddModelFromFile(drake::FindResourceOrThrow(file_path));
   Parser(plant).AddModelFromFile(
       FindResourceOrThrow("models/schunk/schunk_wsg_50_fixed_joint.sdf"));
@@ -127,7 +130,8 @@ void AddDualArmIiwa(const RigidTransformd& X_WL, const RigidTransformd& X_WR,
                     ModelInstanceIndex* right_iiwa_instance) {
   DRAKE_DEMAND(plant != nullptr);
   const std::string file_path =
-      "drake/manipulation/models/iiwa_description/sdf/iiwa14_no_collision.sdf";
+      "drake/manipulation/models/iiwa_description/sdf/"
+      "iiwa14_no_collision.sdf";
   *left_iiwa_instance = Parser(plant).AddModelFromFile(
       drake::FindResourceOrThrow(file_path), "left_iiwa");
   *right_iiwa_instance = Parser(plant).AddModelFromFile(

@@ -577,5 +577,20 @@ void AddOuterPolytope(
     const Eigen::Ref<const MatrixX<symbolic::Variable>>& C,
     const Eigen::Ref<const VectorX<symbolic::Variable>>& d,
     const Eigen::Ref<const VectorX<symbolic::Variable>>& margin);
+
+/**
+ * Given a diagram (which contains the plant and the scene_graph), returns all
+ * the convex polytopes.
+ * @param[out] link_polytopes The polytopes on the link (not attached to the
+ * world) for collision checking.
+ * @param[out] obstacles] The polytopes attached to the world for collision
+ * checking.
+ */
+void GetConvexPolytopes(
+    const systems::Diagram<double>& diagram,
+    const MultibodyPlant<double>* plant,
+    const geometry::SceneGraph<double>* scene_graph,
+    std::vector<std::unique_ptr<const ConvexPolytope>>* link_polytopes,
+    std::vector<std::unique_ptr<const ConvexPolytope>>* obstacles);
 }  // namespace multibody
 }  // namespace drake
