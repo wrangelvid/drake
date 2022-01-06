@@ -126,32 +126,44 @@ void CalcDminusCt(const Eigen::Ref<const MatrixX<T>>& C,
 }  // namespace
 
 CspaceFreeRegion::CspaceFreeRegion(
-    const MultibodyPlant<double>& plant,
-    const std::vector<const ConvexPolytope*>& link_polytopes,
-    const std::vector<const ConvexPolytope*>& obstacles,
+    const systems::Diagram<double>& diagram,
+    const multibody::MultibodyPlant<double>* plant,
+    const geometry::SceneGraph<double>* scene_graph,
     SeparatingPlaneOrder plane_order, CspaceRegionType cspace_region_type)
-    : rational_forward_kinematics_(plant),
-      obstacles_{obstacles},
+    : rational_forward_kinematics_(*plant),
+      scene_graph_{scene_graph},
+      polytope_geometries_{GetConvexPolytopes(diagram, plant, scene_graph)},
       plane_order_{plane_order},
       cspace_region_type_{cspace_region_type} {
-  // First group the link polytopes by the attached link.
-  for (const auto& link_polytope : link_polytopes) {
-    DRAKE_DEMAND(link_polytope->body_index() != plant.world_body().index());
-    const auto it = link_polytopes_.find(link_polytope->body_index());
-    if (it == link_polytopes_.end()) {
-      link_polytopes_.emplace_hint(
-          it,
-          std::make_pair(link_polytope->body_index(),
-                         std::vector<const ConvexPolytope*>({link_polytope})));
-    } else {
-      it->second.push_back(link_polytope);
+  // Now create the separating planes.
+  std::map<SortedPair<BodyIndex>,
+           std::vector<std::pair<const ConvexPolytope*, const ConvexPolytope*>>>
+      collision_pairs;
+  int num_collision_pairs = 0;
+  const auto& model_inspector = scene_graph->model_inspector();
+  for (const auto& [link1, polytopes1] : polytope_geometries_) {
+    for (const auto& [link2, polytopes2] : polytope_geometries_) {
+      if (link1 < link2) {
+        // link_collision_pairs stores all the pair of collision geometry on
+        // (link1, link2).
+        std::vector<std::pair<const ConvexPolytope*, const ConvexPolytope*>>
+            link_collision_pairs;
+        for (const auto& polytope1 : polytopes1) {
+          for (const auto& polytope2 : polytopes2) {
+            if (!model_inspector.CollisionFiltered(polytope1.get_id(),
+                                                   polytope2.get_id())) {
+              num_collision_pairs++;
+              link_collision_pairs.emplace_back(&polytope1, &polytope2);
+            }
+          }
+        }
+        collision_pairs.emplace_hint(collision_pairs.end(),
+                                     SortedPair<BodyIndex>(link1, link2),
+                                     link_collision_pairs);
+      }
     }
   }
-  // Now create the separating planes.
-  // By default, we only consider the pairs between a link polytope and a
-  // world obstacle.
-  // TODO(hongkai.dai): consider the self collision between link obstacles.
-  separating_planes_.reserve(link_polytopes.size() * obstacles.size());
+  separating_planes_.reserve(num_collision_pairs);
   // If we verify an axis-algined bounding box in the C-space, then for each
   // pair of (link, obstacle), then we only need to consider variables t for the
   // joints on the kinematics chain between the link and the obstacle; if we
@@ -159,92 +171,85 @@ CspaceFreeRegion::CspaceFreeRegion(
   // angles.
   std::unordered_map<SortedPair<BodyIndex>, VectorX<symbolic::Variable>>
       map_link_obstacle_to_t;
-  for (const auto& obstacle : obstacles_) {
-    DRAKE_DEMAND(obstacle->body_index() == plant.world_body().index());
-    for (const auto& [link, polytopes_on_link] : link_polytopes_) {
-      for (const auto& link_polytope : polytopes_on_link) {
-        Vector3<symbolic::Expression> a;
-        symbolic::Expression b;
-        const symbolic::Monomial monomial_one{};
-        VectorX<symbolic::Variable> plane_decision_vars;
-        if (plane_order_ == SeparatingPlaneOrder::kConstant) {
-          plane_decision_vars.resize(4);
-          for (int i = 0; i < 3; ++i) {
-            plane_decision_vars(i) = symbolic::Variable(
-                "a" + std::to_string(separating_planes_.size() * 3 + i));
-            plane_decision_vars(3) = symbolic::Variable(
-                "b" + std::to_string(separating_planes_.size()));
-          }
-          a = plane_decision_vars.head<3>().cast<symbolic::Expression>();
-          b = plane_decision_vars(3);
-        } else if (plane_order_ == SeparatingPlaneOrder::kAffine) {
-          VectorX<symbolic::Variable> t_for_plane;
-          if (cspace_region_type_ == CspaceRegionType::kGenericPolytope) {
-            t_for_plane = rational_forward_kinematics_.t();
-          } else if (cspace_region_type_ ==
-                     CspaceRegionType::kAxisAlignedBoundingBox) {
-            SortedPair<BodyIndex> link_obstacle(link_polytope->body_index(),
-                                                obstacle->body_index());
-            auto it = map_link_obstacle_to_t.find(link_obstacle);
-            if (it == map_link_obstacle_to_t.end()) {
-              t_for_plane = rational_forward_kinematics_.FindTOnPath(
-                  obstacle->body_index(), link_polytope->body_index());
-              map_link_obstacle_to_t.emplace_hint(it, link_obstacle,
-                                                  t_for_plane);
-            } else {
-              t_for_plane = it->second;
-            }
-          }
-          // Now create the variable a_coeff, a_constant, b_coeff, b_constant,
-          // such that a = a_coeff * t_for_plane + a_constant, and b = b_coeff *
-          // t_for_plane + b_constant.
-          Matrix3X<symbolic::Variable> a_coeff(3, t_for_plane.rows());
-          Vector3<symbolic::Variable> a_constant;
-          for (int i = 0; i < 3; ++i) {
-            a_constant(i) = symbolic::Variable(
-                fmt::format("a_constant{}({})", separating_planes_.size(), i));
-            for (int j = 0; j < t_for_plane.rows(); ++j) {
-              a_coeff(i, j) = symbolic::Variable(fmt::format(
-                  "a_coeff{}({}, {})", separating_planes_.size(), i, j));
-            }
-          }
-          VectorX<symbolic::Variable> b_coeff(t_for_plane.rows());
-          for (int i = 0; i < t_for_plane.rows(); ++i) {
-            b_coeff(i) = symbolic::Variable(
-                fmt::format("b_coeff{}({})", separating_planes_.size(), i));
-          }
-          symbolic::Variable b_constant(
-              fmt::format("b_constant{}", separating_planes_.size()));
-          // Now construct a(i) = a_coeff.row(i) * t_for_plane + a_constant(i).
-          a = a_coeff * t_for_plane + a_constant;
-          b = b_coeff.cast<symbolic::Expression>().dot(t_for_plane) +
-              b_constant;
-          // Now put a_coeff, a_constant, b_coeff, b_constant to
-          // plane_decision_vars.
-          plane_decision_vars.resize(4 * t_for_plane.rows() + 4);
-          int var_count = 0;
-          for (int i = 0; i < 3; ++i) {
-            plane_decision_vars.segment(var_count, t_for_plane.rows()) =
-                a_coeff.row(i);
-            var_count += t_for_plane.rows();
-          }
-          plane_decision_vars.segment<3>(var_count) = a_constant;
-          var_count += 3;
-          plane_decision_vars.segment(var_count, t_for_plane.rows()) = b_coeff;
-          var_count += t_for_plane.rows();
-          plane_decision_vars(var_count) = b_constant;
-          var_count++;
+  for (const auto& [link_pair, polytope_pairs] : collision_pairs) {
+    for (const auto& polytope_pair : polytope_pairs) {
+      Vector3<symbolic::Expression> a;
+      symbolic::Expression b;
+      const symbolic::Monomial monomial_one{};
+      VectorX<symbolic::Variable> plane_decision_vars;
+      if (plane_order_ == SeparatingPlaneOrder::kConstant) {
+        plane_decision_vars.resize(4);
+        for (int i = 0; i < 3; ++i) {
+          plane_decision_vars(i) = symbolic::Variable(
+              "a" + std::to_string(separating_planes_.size() * 3 + i));
+          plane_decision_vars(3) = symbolic::Variable(
+              "b" + std::to_string(separating_planes_.size()));
         }
-        separating_planes_.emplace_back(
-            a, b, link_polytope, obstacle,
-            internal::FindBodyInTheMiddleOfChain(plant, obstacle->body_index(),
-                                                 link_polytope->body_index()),
-            plane_order_, plane_decision_vars);
-        map_polytopes_to_separating_planes_.emplace(
-            SortedPair<ConvexGeometry::Id>(link_polytope->get_id(),
-                                           obstacle->get_id()),
-            &(separating_planes_[separating_planes_.size() - 1]));
+        a = plane_decision_vars.head<3>().cast<symbolic::Expression>();
+        b = plane_decision_vars(3);
+      } else if (plane_order_ == SeparatingPlaneOrder::kAffine) {
+        VectorX<symbolic::Variable> t_for_plane;
+        if (cspace_region_type_ == CspaceRegionType::kGenericPolytope) {
+          t_for_plane = rational_forward_kinematics_.t();
+        } else if (cspace_region_type_ ==
+                   CspaceRegionType::kAxisAlignedBoundingBox) {
+          auto it = map_link_obstacle_to_t.find(link_pair);
+          if (it == map_link_obstacle_to_t.end()) {
+            t_for_plane = rational_forward_kinematics_.FindTOnPath(
+                link_pair.first(), link_pair.second());
+            map_link_obstacle_to_t.emplace_hint(it, link_pair, t_for_plane);
+          } else {
+            t_for_plane = it->second;
+          }
+        }
+        // Now create the variable a_coeff, a_constant, b_coeff, b_constant,
+        // such that a = a_coeff * t_for_plane + a_constant, and b = b_coeff *
+        // t_for_plane + b_constant.
+        Matrix3X<symbolic::Variable> a_coeff(3, t_for_plane.rows());
+        Vector3<symbolic::Variable> a_constant;
+        for (int i = 0; i < 3; ++i) {
+          a_constant(i) = symbolic::Variable(
+              fmt::format("a_constant{}({})", separating_planes_.size(), i));
+          for (int j = 0; j < t_for_plane.rows(); ++j) {
+            a_coeff(i, j) = symbolic::Variable(fmt::format(
+                "a_coeff{}({}, {})", separating_planes_.size(), i, j));
+          }
+        }
+        VectorX<symbolic::Variable> b_coeff(t_for_plane.rows());
+        for (int i = 0; i < t_for_plane.rows(); ++i) {
+          b_coeff(i) = symbolic::Variable(
+              fmt::format("b_coeff{}({})", separating_planes_.size(), i));
+        }
+        symbolic::Variable b_constant(
+            fmt::format("b_constant{}", separating_planes_.size()));
+        // Now construct a(i) = a_coeff.row(i) * t_for_plane + a_constant(i).
+        a = a_coeff * t_for_plane + a_constant;
+        b = b_coeff.cast<symbolic::Expression>().dot(t_for_plane) + b_constant;
+        // Now put a_coeff, a_constant, b_coeff, b_constant to
+        // plane_decision_vars.
+        plane_decision_vars.resize(4 * t_for_plane.rows() + 4);
+        int var_count = 0;
+        for (int i = 0; i < 3; ++i) {
+          plane_decision_vars.segment(var_count, t_for_plane.rows()) =
+              a_coeff.row(i);
+          var_count += t_for_plane.rows();
+        }
+        plane_decision_vars.segment<3>(var_count) = a_constant;
+        var_count += 3;
+        plane_decision_vars.segment(var_count, t_for_plane.rows()) = b_coeff;
+        var_count += t_for_plane.rows();
+        plane_decision_vars(var_count) = b_constant;
+        var_count++;
       }
+      separating_planes_.emplace_back(
+          a, b, polytope_pair.first, polytope_pair.second,
+          internal::FindBodyInTheMiddleOfChain(*plant, link_pair.first(),
+                                               link_pair.second()),
+          plane_order_, plane_decision_vars);
+      map_polytopes_to_separating_planes_.emplace(
+          SortedPair<ConvexGeometry::Id>(polytope_pair.first->get_id(),
+                                         polytope_pair.second->get_id()),
+          &(separating_planes_[separating_planes_.size() - 1]));
     }
   }
 }
@@ -491,15 +496,20 @@ CspaceFreeRegion::ConstructProgramForCspacePolytope(
 bool CspaceFreeRegion::IsPostureInCollision(
     const systems::Context<double>& context) const {
   const auto& plant = rational_forward_kinematics_.plant();
-  drake::math::RigidTransform<double> X_WW;
-  X_WW.SetIdentity();
-  for (const auto& link_and_polytopes : link_polytopes_) {
-    const drake::math::RigidTransform<double> X_WB = plant.EvalBodyPoseInWorld(
-        context, plant.get_body(link_and_polytopes.first));
-    for (const auto& link_polytope : link_and_polytopes.second) {
-      for (const auto& obstacle : obstacles_) {
-        if (link_polytope->IsInCollision(*obstacle, X_WB, X_WW)) {
-          return true;
+  drake::math::RigidTransform<double> X_WB1;
+  drake::math::RigidTransform<double> X_WB2;
+  const auto& model_inspector = scene_graph_->model_inspector();
+  for (const auto& [link1, polytopes1] : polytope_geometries_) {
+    X_WB1 = plant.EvalBodyPoseInWorld(context, plant.get_body(link1));
+    for (const auto& [link2, polytopes2] : polytope_geometries_) {
+      X_WB2 = plant.EvalBodyPoseInWorld(context, plant.get_body(link2));
+      for (const auto& polytope1 : polytopes1) {
+        for (const auto& polytope2 : polytopes2) {
+          if (!model_inspector.CollisionFiltered(polytope1.get_id(),
+                                                 polytope2.get_id()) &&
+              polytope1.IsInCollision(polytope2, X_WB1, X_WB2)) {
+            return true;
+          }
         }
       }
     }
@@ -1260,12 +1270,11 @@ void AddOuterPolytope(
   }
 }
 
-void GetConvexPolytopes(
+std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     const systems::Diagram<double>& diagram,
     const MultibodyPlant<double>* plant,
-    const geometry::SceneGraph<double>* scene_graph,
-    std::vector<std::unique_ptr<const ConvexPolytope>>* link_polytopes,
-    std::vector<std::unique_ptr<const ConvexPolytope>>* obstacles) {
+    const geometry::SceneGraph<double>* scene_graph) {
+  std::map<BodyIndex, std::vector<ConvexPolytope>> ret;
   // First generate the query object.
   auto diagram_context = diagram.CreateDefaultContext();
   diagram.Publish(*diagram_context);
@@ -1285,16 +1294,20 @@ void GetConvexPolytopes(
       for (const auto& geometry_id : geometry_ids) {
         const geometry::optimization::VPolytope v_polytope(
             query_object, geometry_id, frame_id.value());
-        auto convex_polytope = std::make_unique<const ConvexPolytope>(
-            body_index, geometry_id, v_polytope.vertices());
-        if (body_index == plant->world_body().index()) {
-          obstacles->push_back(std::move(convex_polytope));
+        const ConvexPolytope convex_polytope(body_index, geometry_id,
+                                             v_polytope.vertices());
+        auto it = ret.find(body_index);
+        if (it == ret.end()) {
+          std::vector<ConvexPolytope> body_polytopes;
+          body_polytopes.push_back(convex_polytope);
+          ret.emplace_hint(it, body_index, body_polytopes);
         } else {
-          link_polytopes->push_back(std::move(convex_polytope));
+          it->second.push_back(convex_polytope);
         }
       }
     }
   }
+  return ret;
 }
 
 // Explicit instantiation.
