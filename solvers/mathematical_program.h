@@ -1125,6 +1125,56 @@ class MathematicalProgram {
   }
 
   /**
+   * Adds an L2 norm cost |Ax+b|₂ (notice this cost is not quadratic since we
+   * don't take the square of the L2 norm).
+   * Refer to AddL2NormCost for more details.
+   */
+  Binding<L2NormCost> AddCost(const Binding<L2NormCost>& binding);
+
+  /**
+   * Adds an L2 norm cost |Ax+b|₂ (notice this cost is not quadratic since we
+   * don't take the square of the L2 norm).
+   * @note Currently no solver supports kL2NormCost, and the user will
+   * receive an error message if they add L2NormCost and call Solve().
+   * @pydrake_mkdoc_identifier{3args_A_b_vars}
+   */
+  // TODO(hongkai.dai): support L2NormCost in each solver.
+  Binding<L2NormCost> AddL2NormCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b,
+      const Eigen::Ref<const VectorXDecisionVariable>& vars);
+
+  /**
+   * Adds an L2 norm cost |Ax+b|₂ (notice this cost is not quadratic since we
+   * don't take the square of the L2 norm)
+   * @pydrake_mkdoc_identifier{3args_A_b_vars_list}
+   */
+  Binding<L2NormCost> AddL2NormCost(const Eigen::Ref<const Eigen::MatrixXd>& A,
+                                    const Eigen::Ref<const Eigen::VectorXd>& b,
+                                    const VariableRefList& vars) {
+    return AddL2NormCost(A, b, ConcatenateVariableRefList(vars));
+  }
+
+  /**
+   * Adds an L2 norm cost min |Ax+b|₂ as a linear cost min s
+   * on the slack variable s, together with a Lorentz cone constraint
+   * s ≥ |Ax+b|₂
+   * Many conic optimization solvers (Gurobi, Mosek, SCS, etc) natively prefers
+   * this form of linear cost + conic constraints. So if you are going to use
+   * one of these conic solvers, then add the L2 norm cost using this function
+   * instead of AddL2NormCost().
+   * @return (s, linear_cost, lorentz_cone_constraint). `s` is the slack
+   * variable (with variable name string as "slack"), `linear_cost` is the cost
+   * on `s`, and `lorentz_cone_constraint` is the constraint s≥|Ax+b|₂
+   */
+  std::tuple<symbolic::Variable, Binding<LinearCost>,
+             Binding<LorentzConeConstraint>>
+  AddL2NormCostUsingConicConstraint(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b,
+      const Eigen::Ref<const VectorXDecisionVariable>& vars);
+
+  /**
    * Adds a cost term in the polynomial form.
    * @param e A symbolic expression in the polynomial form.
    * @return The newly created cost and the bound variables.
@@ -1149,18 +1199,32 @@ class MathematicalProgram {
    * log(det(X)) is a concave function of X, so we can maximize it through
    * convex optimization. In order to do that, we introduce slack variables t,
    * and a lower triangular matrix Z, with the constraints
-   * ⌈X         Z⌉ is positive semidifinite.
-   * ⌊Zᵀ  diag(Z)⌋
-   * log(Z(i, i)) >= t(i)
+   *
+   *     ⌈X         Z⌉ is positive semidifinite.
+   *     ⌊Zᵀ  diag(Z)⌋
+   *
+   *     log(Z(i, i)) >= t(i)
+   *
    * and we will minimize -∑ᵢt(i).
    * @param X A symmetric positive semidefinite matrix X, whose log(det(X)) will
    * be maximized.
+   * @return (cost, t, Z) cost is -∑ᵢt(i), we also return the newly created
+   * slack variables t and the lower triangular matrix Z. Note that Z is not a
+   * matrix of symbolic::Variable but symbolic::Expression, because the
+   * upper-diagonal entries of Z are not variable, but expression 0.
    * @pre X is a symmetric matrix.
+   * @note We implicitly require that `X` being positive semidefinite (psd) (as
+   * X is the diagonal entry of the big psd matrix above). If your `X` is not
+   * necessarily psd, then don't call this function.
    * @note The constraint log(Z(i, i)) >= t(i) is imposed as an exponential cone
    * constraint. Please make sure your have a solver that supports exponential
    * cone constraint (currently SCS does).
+   * Refer to https://docs.mosek.com/modeling-cookbook/sdo.html#log-determinant
+   * for more details.
    */
-  void AddMaximizeLogDeterminantSymmetricMatrixCost(
+  std::tuple<Binding<LinearCost>, VectorX<symbolic::Variable>,
+             MatrixX<symbolic::Expression>>
+  AddMaximizeLogDeterminantSymmetricMatrixCost(
       const Eigen::Ref<const MatrixX<symbolic::Expression>>& X);
 
   /**
@@ -2470,28 +2534,35 @@ class MathematicalProgram {
    * that is, @p p can be decomposed into `mᵀQm`, where m is the @p
    * monomial_basis. It returns the coefficients matrix Q, which is positive
    * semidefinite.
+   * @param type The type of the polynomial. @default is kSos, but the user can
+   * also use kSdsos and kDsos. Refer to NonnegativePolynomial for details on
+   * different types of sos polynomials.
    *
    * @note It calls `Reparse` to enforce `p` to have this MathematicalProgram's
    * indeterminates if necessary.
    */
   MatrixXDecisionVariable AddSosConstraint(
       const symbolic::Polynomial& p,
-      const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis);
+      const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+      NonnegativePolynomial type = NonnegativePolynomial::kSos);
 
   /**
    * Adds constraints that a given polynomial @p p is a sums-of-squares (SOS),
    * that is, @p p can be decomposed into `mᵀQm`, where m is a monomial
    * basis selected from the sparsity of @p p. It returns a pair of constraint
    * bindings expressing:
+   *  - The coefficients matrix Q, which is positive semidefinite.
+   *  - The monomial basis m.
+   * @param type The type of the polynomial. @default is kSos, but the user can
+   * also use kSdsos and kDsos. Refer to NonnegativePolynomial for the details
+   * on different type of sos polynomials.
    *
    * @note It calls `Reparse` to enforce `p` to have this MathematicalProgram's
    * indeterminates if necessary.
-   *
-   *  - The coefficients matrix Q, which is positive semidefinite.
-   *  - The monomial basis m.
    */
   std::pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
-  AddSosConstraint(const symbolic::Polynomial& p);
+  AddSosConstraint(const symbolic::Polynomial& p,
+                   NonnegativePolynomial type = NonnegativePolynomial::kSos);
 
   /**
    * Adds constraints that a given symbolic expression @p e is a
@@ -2500,22 +2571,25 @@ class MathematicalProgram {
    * polynomial with respect to `indeterminates()` in this mathematical
    * program. It returns the coefficients matrix Q, which is positive
    * semidefinite.
+   * @param type Refer to NonnegativePolynomial class documentation.
    */
   MatrixXDecisionVariable AddSosConstraint(
       const symbolic::Expression& e,
-      const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis);
+      const Eigen::Ref<const VectorX<symbolic::Monomial>>& monomial_basis,
+      NonnegativePolynomial type = NonnegativePolynomial::kSos);
 
   /**
    * Adds constraints that a given symbolic expression @p e is a sums-of-squares
    * (SOS), that is, @p e can be decomposed into `mᵀQm`. Note that it decomposes
    * @p e into a polynomial with respect to `indeterminates()` in this
    * mathematical program. It returns a pair expressing:
-   *
    *  - The coefficients matrix Q, which is positive semidefinite.
    *  - The monomial basis m.
+   * @param type Refer to NonnegativePolynomial class documentation.
    */
   std::pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>>
-  AddSosConstraint(const symbolic::Expression& e);
+  AddSosConstraint(const symbolic::Expression& e,
+                   NonnegativePolynomial type = NonnegativePolynomial::kSos);
 
   /**
    * Constraining that two polynomials are the same (i.e., they have the same
@@ -2778,6 +2852,11 @@ class MathematicalProgram {
   /** Getter for quadratic costs. */
   const std::vector<Binding<QuadraticCost>>& quadratic_costs() const {
     return quadratic_costs_;
+  }
+
+  /** Getter for l2norm costs. */
+  const std::vector<Binding<L2NormCost>>& l2norm_costs() const {
+    return l2norm_costs_;
   }
 
   /** Getter for linear constraints. */
@@ -3193,6 +3272,7 @@ class MathematicalProgram {
   std::vector<Binding<Cost>> generic_costs_;
   std::vector<Binding<QuadraticCost>> quadratic_costs_;
   std::vector<Binding<LinearCost>> linear_costs_;
+  std::vector<Binding<L2NormCost>> l2norm_costs_;
   // TODO(naveenoid) : quadratic_constraints_
 
   // note: linear_constraints_ does not include linear_equality_constraints_
