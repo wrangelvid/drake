@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <limits>
+#include <queue>
 
 #include <gtest/gtest.h>
 

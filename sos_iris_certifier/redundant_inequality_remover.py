@@ -11,6 +11,7 @@ def prune_region(region):
         prog = MathematicalProgram()
         x = prog.NewContinuousVariables(region.A().shape[1], 'x')
 
+
         cur_kept_indices = kept_indices.copy()
         cur_kept_indices.remove(excluded_index)
 
