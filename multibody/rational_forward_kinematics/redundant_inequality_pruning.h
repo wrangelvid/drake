@@ -1,8 +1,18 @@
-//
-// Created by amice on 1/6/22.
-//
+#pragma once
 
-#ifndef DRAKE_REDUNDANT_INEQUALITY_PRUNING_H
-#define DRAKE_REDUNDANT_INEQUALITY_PRUNING_H
+#include <map>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
-#endif //DRAKE_REDUNDANT_INEQUALITY_PRUNING_H
+#include "drake/solvers/mathematical_program.h"
+#include "drake/solvers/mathematical_program_result.h"
+
+namespace drake{
+namespace multibody{
+
+
+
+}
+}
