@@ -10,6 +10,7 @@
 #include "drake/bindings/pydrake/autodiff_types_pybind.h"
 #include "drake/bindings/pydrake/common/cpp_param_pybind.h"
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
@@ -648,6 +649,17 @@ void BindMathematicalProgram(py::module m) {
       m, "MathematicalProgram", doc.MathematicalProgram.doc);
   prog_cls.def(py::init<>(), doc.MathematicalProgram.ctor.doc);
   DefClone(&prog_cls);
+
+  py::enum_<MathematicalProgram::NonnegativePolynomial>(prog_cls,
+      "NonnegativePolynomial",
+      doc.MathematicalProgram.NonnegativePolynomial.doc)
+      .value("kSos", MathematicalProgram::NonnegativePolynomial::kSos,
+          doc.MathematicalProgram.NonnegativePolynomial.kSos.doc)
+      .value("kSdsos", MathematicalProgram::NonnegativePolynomial::kSdsos,
+          doc.MathematicalProgram.NonnegativePolynomial.kSdsos.doc)
+      .value("kDsos", MathematicalProgram::NonnegativePolynomial::kDsos,
+          doc.MathematicalProgram.NonnegativePolynomial.kDsos.doc);
+
   prog_cls  // BR
       .def("__str__", &MathematicalProgram::to_string,
           doc.MathematicalProgram.to_string.doc)
@@ -862,14 +874,26 @@ void BindMathematicalProgram(py::module m) {
               &MathematicalProgram::Add2NormSquaredCost),
           py::arg("A"), py::arg("b"), py::arg("vars"),
           doc.MathematicalProgram.Add2NormSquaredCost.doc)
-      .def("AddMaximizeLogDeterminantSymmetricMatrixCost",
-          static_cast<void (MathematicalProgram::*)(
+      .def("AddL2NormCost",
+          overload_cast_explicit<Binding<L2NormCost>,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::VectorXd>&,
+              const Eigen::Ref<const VectorXDecisionVariable>&>(
+              &MathematicalProgram::AddL2NormCost),
+          py::arg("A"), py::arg("b"), py::arg("vars"),
+          doc.MathematicalProgram.AddL2NormCost.doc_3args_A_b_vars)
+      .def("AddL2NormCostUsingConicConstraint",
+          &MathematicalProgram::AddL2NormCostUsingConicConstraint, py::arg("A"),
+          py::arg("b"), py::arg("vars"),
+          doc.MathematicalProgram.AddL2NormCostUsingConicConstraint.doc)
+      .def("AddMaximizeLogDeterminantCost",
+          static_cast<std::tuple<Binding<LinearCost>,
+              VectorX<symbolic::Variable>, MatrixX<symbolic::Expression>> (
+              MathematicalProgram::*)(
               const Eigen::Ref<const MatrixX<symbolic::Expression>>& X)>(
-              &MathematicalProgram::
-                  AddMaximizeLogDeterminantSymmetricMatrixCost),
+              &MathematicalProgram::AddMaximizeLogDeterminantCost),
           py::arg("X"),
-          doc.MathematicalProgram.AddMaximizeLogDeterminantSymmetricMatrixCost
-              .doc)
+          doc.MathematicalProgram.AddMaximizeLogDeterminantCost.doc)
       .def("AddMaximizeGeometricMeanCost",
           overload_cast_explicit<void, const Eigen::Ref<const Eigen::MatrixXd>&,
               const Eigen::Ref<const Eigen::VectorXd>&,
@@ -1132,28 +1156,38 @@ void BindMathematicalProgram(py::module m) {
               .doc_variable)
       .def("AddSosConstraint",
           static_cast<MatrixXDecisionVariable (MathematicalProgram::*)(
-              const Polynomial&, const Eigen::Ref<const VectorX<Monomial>>&)>(
+              const Polynomial&, const Eigen::Ref<const VectorX<Monomial>>&,
+              MathematicalProgram::NonnegativePolynomial)>(
               &MathematicalProgram::AddSosConstraint),
           py::arg("p"), py::arg("monomial_basis"),
-          doc.MathematicalProgram.AddSosConstraint.doc_2args_p_monomial_basis)
+          py::arg("type") = MathematicalProgram::NonnegativePolynomial::kSos,
+          doc.MathematicalProgram.AddSosConstraint
+              .doc_3args_p_monomial_basis_type)
       .def("AddSosConstraint",
-          static_cast<
-              std::pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> (
-                  MathematicalProgram::*)(const Polynomial&)>(
+          static_cast<std::pair<MatrixXDecisionVariable,
+              VectorX<symbolic::Monomial>> (MathematicalProgram::*)(
+              const Polynomial&, MathematicalProgram::NonnegativePolynomial)>(
               &MathematicalProgram::AddSosConstraint),
-          py::arg("p"), doc.MathematicalProgram.AddSosConstraint.doc_1args_p)
+          py::arg("p"),
+          py::arg("type") = MathematicalProgram::NonnegativePolynomial::kSos,
+          doc.MathematicalProgram.AddSosConstraint.doc_2args_p_type)
       .def("AddSosConstraint",
           static_cast<MatrixXDecisionVariable (MathematicalProgram::*)(
-              const Expression&, const Eigen::Ref<const VectorX<Monomial>>&)>(
+              const Expression&, const Eigen::Ref<const VectorX<Monomial>>&,
+              MathematicalProgram::NonnegativePolynomial)>(
               &MathematicalProgram::AddSosConstraint),
           py::arg("e"), py::arg("monomial_basis"),
-          doc.MathematicalProgram.AddSosConstraint.doc_2args_e_monomial_basis)
+          py::arg("type") = MathematicalProgram::NonnegativePolynomial::kSos,
+          doc.MathematicalProgram.AddSosConstraint
+              .doc_3args_e_monomial_basis_type)
       .def("AddSosConstraint",
-          static_cast<
-              std::pair<MatrixXDecisionVariable, VectorX<symbolic::Monomial>> (
-                  MathematicalProgram::*)(const Expression&)>(
+          static_cast<std::pair<MatrixXDecisionVariable,
+              VectorX<symbolic::Monomial>> (MathematicalProgram::*)(
+              const Expression&, MathematicalProgram::NonnegativePolynomial)>(
               &MathematicalProgram::AddSosConstraint),
-          py::arg("e"), doc.MathematicalProgram.AddSosConstraint.doc_1args_e)
+          py::arg("e"),
+          py::arg("type") = MathematicalProgram::NonnegativePolynomial::kSos,
+          doc.MathematicalProgram.AddSosConstraint.doc_2args_e_type)
       .def("AddEqualityConstraintBetweenPolynomials",
           &MathematicalProgram::AddEqualityConstraintBetweenPolynomials,
           py::arg("p1"), py::arg("p2"),
@@ -1308,6 +1342,8 @@ void BindMathematicalProgram(py::module m) {
           doc.MathematicalProgram.linear_costs.doc)
       .def("quadratic_costs", &MathematicalProgram::quadratic_costs,
           doc.MathematicalProgram.quadratic_costs.doc)
+      .def("l2norm_costs", &MathematicalProgram::l2norm_costs,
+          doc.MathematicalProgram.l2norm_costs.doc)
       .def("linear_constraints", &MathematicalProgram::linear_constraints,
           doc.MathematicalProgram.linear_constraints.doc)
       .def("lorentz_cone_constraints",
@@ -1460,15 +1496,22 @@ for every column of ``prog_var_vals``. )""")
       .def("RemoveConstraint", &MathematicalProgram::RemoveConstraint,
           py::arg("constraint"), doc.MathematicalProgram.RemoveConstraint.doc);
 
-  py::enum_<MathematicalProgram::NonnegativePolynomial>(prog_cls,
-      "NonnegativePolynomial",
-      doc.MathematicalProgram.NonnegativePolynomial.doc)
-      .value("kSos", MathematicalProgram::NonnegativePolynomial::kSos,
-          doc.MathematicalProgram.NonnegativePolynomial.kSos.doc)
-      .value("kSdsos", MathematicalProgram::NonnegativePolynomial::kSdsos,
-          doc.MathematicalProgram.NonnegativePolynomial.kSdsos.doc)
-      .value("kDsos", MathematicalProgram::NonnegativePolynomial::kDsos,
-          doc.MathematicalProgram.NonnegativePolynomial.kDsos.doc);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  prog_cls.def("AddMaximizeLogDeterminantSymmetricMatrixCost",
+      WrapDeprecated(
+          doc.MathematicalProgram.AddMaximizeLogDeterminantSymmetricMatrixCost
+              .doc_deprecated,
+          static_cast<std::tuple<Binding<LinearCost>,
+              VectorX<symbolic::Variable>, MatrixX<symbolic::Expression>> (
+              MathematicalProgram::*)(
+              const Eigen::Ref<const MatrixX<symbolic::Expression>>& X)>(
+              &MathematicalProgram::
+                  AddMaximizeLogDeterminantSymmetricMatrixCost)),
+      py::arg("X"),
+      doc.MathematicalProgram.AddMaximizeLogDeterminantSymmetricMatrixCost
+          .doc_deprecated);
+#pragma GCC diagnostic pop
 
   py::enum_<SolutionResult>(m, "SolutionResult", doc.SolutionResult.doc)
       .value("kSolutionFound", SolutionResult::kSolutionFound,
@@ -1642,7 +1685,10 @@ void BindEvaluatorsAndBindings(py::module m) {
       .def("A", &LorentzConeConstraint::A, doc.LorentzConeConstraint.A.doc)
       .def("b", &LorentzConeConstraint::b, doc.LorentzConeConstraint.b.doc)
       .def("eval_type", &LorentzConeConstraint::eval_type,
-          doc.LorentzConeConstraint.eval_type.doc);
+          doc.LorentzConeConstraint.eval_type.doc)
+      .def("UpdateCoefficients", &LorentzConeConstraint::UpdateCoefficients,
+          py::arg("new_A"), py::arg("new_b"),
+          doc.LorentzConeConstraint.UpdateCoefficients.doc);
 
   py::class_<RotatedLorentzConeConstraint, Constraint,
       std::shared_ptr<RotatedLorentzConeConstraint>>(
@@ -1654,7 +1700,11 @@ void BindEvaluatorsAndBindings(py::module m) {
       .def("A", &RotatedLorentzConeConstraint::A,
           doc.RotatedLorentzConeConstraint.A.doc)
       .def("b", &RotatedLorentzConeConstraint::b,
-          doc.RotatedLorentzConeConstraint.b.doc);
+          doc.RotatedLorentzConeConstraint.b.doc)
+      .def("UpdateCoefficients",
+          &RotatedLorentzConeConstraint::UpdateCoefficients, py::arg("new_A"),
+          py::arg("new_b"),
+          doc.RotatedLorentzConeConstraint.UpdateCoefficients.doc);
 
   py::class_<LinearEqualityConstraint, LinearConstraint,
       std::shared_ptr<LinearEqualityConstraint>>(

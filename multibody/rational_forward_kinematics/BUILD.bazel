@@ -61,6 +61,17 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "redundant_inequality_pruning",
+    srcs = ["redundant_inequality_pruning.cc"],
+    hdrs = ["redundant_inequality_pruning.h"],
+    deps = [
+        "//common:symbolic",
+        "//solvers:mathematical_program",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_library(
     name = "plane_side",
     srcs = ["plane_side.cc"],
     hdrs = ["plane_side.h"],
@@ -168,7 +179,7 @@ drake_cc_library(
 
 drake_cc_googletest(
     name = "configuration_space_collision_free_region_test",
-    timeout="long",
+    timeout = "long",
     deps = [
         ":configuration_space_collision_free_region",
         ":rational_forward_kinematics_test_utilities",
@@ -180,7 +191,7 @@ drake_cc_googletest(
 
 drake_cc_googletest(
     name = "cspace_free_region_test",
-    timeout="long",
+    timeout = "long",
     deps = [
         ":cspace_free_region",
         ":rational_forward_kinematics_test_utilities2",

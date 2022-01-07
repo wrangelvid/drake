@@ -28,6 +28,7 @@
 #include "drake/common/test_utilities/symbolic_test_util.h"
 #include "drake/math/matrix_util.h"
 #include "drake/solvers/constraint.h"
+#include "drake/solvers/program_attribute.h"
 #include "drake/solvers/snopt_solver.h"
 #include "drake/solvers/solve.h"
 #include "drake/solvers/test/generic_trivial_constraints.h"
@@ -2510,7 +2511,7 @@ GTEST_TEST(TestMathematicalProgram, AddSymbolicQuadraticCost) {
   EXPECT_FALSE(cost10.evaluator()->is_convex());
 }
 
-GTEST_TEST(TestMathematicalProgram, TestL2NormCost) {
+GTEST_TEST(TestMathematicalProgram, Test2NormSquaredCost) {
   MathematicalProgram prog;
   auto x = prog.NewContinuousVariables<2>();
 
@@ -2540,6 +2541,68 @@ GTEST_TEST(TestMathematicalProgram, TestL2NormCost) {
 
     x0 += Eigen::Vector2d::Constant(2);
   }
+}
+
+GTEST_TEST(TestMathematicalProgram, AddL2NormCost) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+
+  Eigen::Matrix2d A;
+  A << 1, 2, 3, 4;
+  Eigen::Vector2d b(2, 3);
+
+  auto obj1 =
+      prog.AddCost(Binding<L2NormCost>(std::make_shared<L2NormCost>(A, b), x));
+  EXPECT_GT(prog.required_capabilities().count(ProgramAttribute::kL2NormCost),
+            0);
+  EXPECT_EQ(prog.l2norm_costs().size(), 1u);
+  EXPECT_EQ(prog.GetAllCosts().size(), 1u);
+
+  auto obj2 = prog.AddL2NormCost(A, b, x);
+  EXPECT_EQ(prog.l2norm_costs().size(), 2u);
+
+  prog.RemoveCost(obj1);
+  prog.RemoveCost(obj2);
+  EXPECT_EQ(prog.l2norm_costs().size(), 0u);
+  EXPECT_EQ(prog.required_capabilities().count(ProgramAttribute::kL2NormCost),
+            0u);
+
+  prog.AddL2NormCost(A, b, {x.head<1>(), x.tail<1>()});
+  EXPECT_EQ(prog.l2norm_costs().size(), 1u);
+  EXPECT_GT(prog.required_capabilities().count(ProgramAttribute::kL2NormCost),
+            0u);
+
+  auto new_prog = prog.Clone();
+  EXPECT_EQ(new_prog->l2norm_costs().size(), 1u);
+}
+
+GTEST_TEST(TestMathematicalProgram, AddL2NormCostUsingConicConstraint) {
+  MathematicalProgram prog{};
+  auto x = prog.NewContinuousVariables<2>();
+  Eigen::Matrix2d A;
+  A << 1, 2, 3, 4;
+  const Eigen::Vector2d b(2, 3);
+  const auto ret = prog.AddL2NormCostUsingConicConstraint(A, b, x);
+  const symbolic::Variable& s = std::get<0>(ret);
+  const Binding<LinearCost>& linear_cost = std::get<1>(ret);
+  const Binding<LorentzConeConstraint>& lorentz_cone_constraint =
+      std::get<2>(ret);
+  EXPECT_GE(prog.FindDecisionVariableIndex(s), 0);
+  EXPECT_EQ(linear_cost.variables().rows(), 1);
+  EXPECT_EQ(linear_cost.variables(), Vector1<symbolic::Variable>(s));
+  EXPECT_EQ(linear_cost.evaluator()->a(), Vector1d(1));
+  EXPECT_EQ(linear_cost.evaluator()->b(), 0);
+  EXPECT_EQ(prog.linear_costs().size(), 1u);
+  EXPECT_EQ(prog.lorentz_cone_constraints().size(), 1u);
+  EXPECT_EQ(lorentz_cone_constraint.variables().rows(), 3);
+  EXPECT_EQ(lorentz_cone_constraint.variables(),
+            Vector3<symbolic::Variable>(s, x(0), x(1)));
+  Vector3<symbolic::Expression> lorentz_eval_expected;
+  lorentz_eval_expected << s, A * x + b;
+  EXPECT_EQ(lorentz_cone_constraint.evaluator()->A() *
+                    lorentz_cone_constraint.variables() +
+                lorentz_cone_constraint.evaluator()->b(),
+            lorentz_eval_expected);
 }
 
 // Helper function for ArePolynomialIsomorphic.
@@ -3284,6 +3347,43 @@ GTEST_TEST(TestMathematicalProgram, ReparsePolynomial) {
     prog.Reparse(&p);
     EXPECT_PRED2(PolyEqual, p, expected);
   }
+}
+
+GTEST_TEST(TestMathematicalProgram, AddSosConstraint) {
+  MathematicalProgram prog{};
+  const auto x = prog.NewIndeterminates<1>()(0);
+  const auto a = prog.NewContinuousVariables<1>()(0);
+
+  // p1 has both a and x as indeterminates. So we need to reparse the polynomial
+  // to have only x as the indeterminates.
+  const symbolic::Polynomial p1(a + x * x);
+  const Vector2<symbolic::Monomial> monomial_basis(symbolic::Monomial{},
+                                                   symbolic::Monomial(x, 1));
+
+  const Matrix2<symbolic::Variable> Q_psd =
+      prog.AddSosConstraint(p1, monomial_basis);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
+  EXPECT_EQ(prog.lorentz_cone_constraints().size(), 0u);
+  EXPECT_EQ(prog.rotated_lorentz_cone_constraints().size(), 0u);
+  const int num_lin_con = prog.linear_constraints().size() +
+                          prog.linear_equality_constraints().size();
+  // Now call AddSosConstraint with type=kDsos.
+  prog.AddSosConstraint(p1, monomial_basis,
+                        MathematicalProgram::NonnegativePolynomial::kDsos);
+  // With dsos, the mathematical program adds more linear constraints than it
+  // did with sos.
+  EXPECT_GT(prog.linear_constraints().size() +
+                prog.linear_equality_constraints().size(),
+            2 * num_lin_con);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
+
+  // Now call AddSosConstraint with type=kSdsos.
+  prog.AddSosConstraint(p1, monomial_basis,
+                        MathematicalProgram::NonnegativePolynomial::kSdsos);
+  EXPECT_GT(prog.lorentz_cone_constraints().size() +
+                prog.rotated_lorentz_cone_constraints().size(),
+            0u);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
 }
 
 template <typename C>

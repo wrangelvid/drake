@@ -17,29 +17,22 @@ namespace drake {
 namespace pydrake {
 
 template <typename T>
-void DoPoseDeclaration(py::module m, T) {
-  using namespace drake::multibody;
-  py::tuple param = GetPyParam<T>();
-  using Class = RationalForwardKinematics::Pose<T>;
-  auto cls = DefineTemplateClassWithDefault<Class>(
-      m, "RationalForwardKinematicsPose", param);
-  //    py::class_<Class>(m, "Pose")
-  cls.def("translation", [](const Class& self) { return self.p_AB; })
-      .def("rotation", [](const Class& self) { return self.R_AB; })
-      //        .def_readwrite("p_AB",
-      //        &RationalForwardKinematics::Pose<T>::p_AB)
-      //        .def_readwrite("R_AB",
-      //        &RationalForwardKinematics::Pose<T>::R_AB)
-      .def_readwrite(
-          "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
-      .def("asRigidTransformExpr",
-          [](const Class& self) { return self.asRigidTransformExpression(); });
 
-  DefCopyAndDeepCopy(&cls);
-  //    AddValueInstantiation<Class>(m);
-  //    AddValueInstantiation<std::vector<Class>>(m);
-  //    AddValueInstantiation<RationalForwardKinematics::Pose>(m);
-}
+void DoPoseDeclaration(py::module m, T)    {
+    using namespace drake::multibody;
+    py::tuple param = GetPyParam<T>();
+    using Class = RationalForwardKinematics::Pose<T>;
+    auto cls = DefineTemplateClassWithDefault<Class>(m, "RationalForwardKinematicsPose", param);
+    cls
+        .def("translation", [](const Class& self) {return self.p_AB;})
+        .def("rotation", [](const Class& self) {return self.R_AB;})
+        .def_readwrite(
+            "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
+        .def("asRigidTransformExpr", [](const Class& self) {return self.asRigidTransformExpression();});
+
+
+    DefCopyAndDeepCopy(&cls);
+  }
 
 PYBIND11_MODULE(rational_forward_kinematics, m) {
   // NOLINTNEXTLINE(build/namespaces): Emulate placement in namespace.
