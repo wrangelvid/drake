@@ -27,8 +27,8 @@ drake_cc_package_library(
     name = "rational_forward_kinematics",
     visibility = ["//visibility:public"],
     deps = [
-        ":configuration_space_collision_free_region",
         ":convex_geometry",
+        ":cspace_free_region",
         ":generate_monomial_basis_util",
         ":plane_side",
         ":rational_forward_kinematics_core",
