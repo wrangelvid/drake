@@ -43,11 +43,11 @@ void DoAddProduct(const Expression& coeff, const Monomial& m,
     // Without expanding the terms, we have `is_zero(c1 + c2) = false` while
     // it's clear that c1 + c2 is a zero polynomial. Using `Expand()` help us
     // identify those cases.
-    //if (is_zero(existing_coeff.Expand() + coeff.Expand())) {
-    //  map->erase(it);
-    //} else {
+    if (is_zero(existing_coeff.Expand() + coeff.Expand())) {
+      map->erase(it);
+    } else {
       existing_coeff += coeff;
-    //}
+    }
   } else {
     // m ∉ dom(map)
     map->emplace_hint(it, m, coeff);
@@ -358,11 +358,11 @@ Variables GetDecisionVariables(const Polynomial::MapType& m) {
 
 }  // namespace
 
-Polynomial::Polynomial(MapType map)
-    : monomial_to_coefficient_map_{move(map)},
+Polynomial::Polynomial(MapType init)
+    : monomial_to_coefficient_map_{move(init)},
       indeterminates_{GetIndeterminates(monomial_to_coefficient_map_)},
       decision_variables_{GetDecisionVariables(monomial_to_coefficient_map_)} {
-  //DRAKE_ASSERT_VOID(CheckInvariant());
+  DRAKE_ASSERT_VOID(CheckInvariant());
 };
 
 Polynomial::Polynomial(const Monomial& m)
@@ -397,7 +397,6 @@ void Polynomial::SetIndeterminates(const Variables& new_indeterminates) {
     // TODO(soonho-tri): Optimize this part.
     *this = Polynomial{ToExpression(), new_indeterminates};
   }
-//  return vars;
 }
 
 const Variables& Polynomial::decision_variables() const {
@@ -579,7 +578,7 @@ Polynomial& Polynomial::operator+=(const Polynomial& p) {
   }
   indeterminates_ += p.indeterminates();
   decision_variables_ += p.decision_variables();
-  // DRAKE_ASSERT_VOID(CheckInvariant());
+  DRAKE_ASSERT_VOID(CheckInvariant());
   return *this;
 }
 
@@ -637,7 +636,9 @@ Polynomial& Polynomial::operator*=(const Polynomial& p) {
     }
   }
   monomial_to_coefficient_map_ = std::move(new_map);
-  //CheckInvariant();
+  indeterminates_ += p.indeterminates();
+  decision_variables_ += p.decision_variables();
+  DRAKE_ASSERT_VOID(CheckInvariant());
   return *this;
 }
 
@@ -650,7 +651,8 @@ Polynomial& Polynomial::operator*=(const Monomial& m) {
     new_map.emplace(m * m_i, coeff_i);
   }
   monomial_to_coefficient_map_ = std::move(new_map);
-  //CheckInvariant();
+  indeterminates_ += m.GetVariables();
+  DRAKE_ASSERT_VOID(CheckInvariant());
   return *this;
 }
 
@@ -718,10 +720,9 @@ bool Polynomial::EqualToAfterExpansion(const Polynomial& p) const {
 }
 
 bool Polynomial::CoefficientsAlmostEqual(const Polynomial& p,
-                                         double tolerance) const {
-  return PolynomialEqual(
-      (*this - p).RemoveTermsWithSmallCoefficients(tolerance),
-      Polynomial(0), true);
+                                         double tol) const {
+  return PolynomialEqual((*this - p).RemoveTermsWithSmallCoefficients(tol),
+                         Polynomial(0), true);
 }
 
 Formula Polynomial::operator==(const Polynomial& p) const {
@@ -744,7 +745,9 @@ Formula Polynomial::operator!=(const Polynomial& p) const {
 
 Polynomial& Polynomial::AddProduct(const Expression& coeff, const Monomial& m) {
   DoAddProduct(coeff, m, &monomial_to_coefficient_map_);
-  //DRAKE_ASSERT_VOID(CheckInvariant());
+  indeterminates_ += m.GetVariables();
+  decision_variables_ += coeff.GetVariables();
+  DRAKE_ASSERT_VOID(CheckInvariant());
   return *this;
 }
 
