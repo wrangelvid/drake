@@ -633,7 +633,7 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
                        .count()) /
                    1000
             << "s\n";
-  prog->AddMaximizeLogDeterminantSymmetricMatrixCost(
+  prog->AddMaximizeLogDeterminantCost(
       P.cast<symbolic::Expression>());
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
@@ -976,7 +976,7 @@ GTEST_TEST(AddInscribedEllipsoid, Test1) {
   const Eigen::Vector2d t_upper(1, 2);
   AddInscribedEllipsoid(&prog, Eigen::MatrixXd::Zero(0, 2), Eigen::VectorXd(0),
                         t_lower, t_upper, P, q);
-  prog.AddMaximizeLogDeterminantSymmetricMatrixCost(
+  prog.AddMaximizeLogDeterminantCost(
       P.cast<symbolic::Expression>());
   const auto result = solvers::Solve(prog);
   const double tol = 1E-7;
@@ -1005,7 +1005,7 @@ GTEST_TEST(AddInscribedEllipsoid, Test2) {
   // clang-format on
   const Eigen::Vector4d d(2, 2, 0, 0);
   AddInscribedEllipsoid(&prog, C, d, t_lower, t_upper, P, q);
-  prog.AddMaximizeLogDeterminantSymmetricMatrixCost(
+  prog.AddMaximizeLogDeterminantCost(
       P.cast<symbolic::Expression>());
   const auto result = solvers::Solve(prog);
   const double tol = 1E-7;
