@@ -235,4 +235,11 @@ drake_cc_googletest(
     ],
 )
 
+drake_cc_googletest(
+    name = "redundant_inequality_pruning_test",
+    deps = [
+        ":redundant_inequality_pruning",
+    ],
+)
+
 add_lint_tests()
