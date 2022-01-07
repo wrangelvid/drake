@@ -324,6 +324,25 @@ drake_py_unittest(
     ],
 )
 
+drake_py_unittest(
+    name = "rational_forward_kinematics_test",
+    size = "medium",
+    data = [
+        "//manipulation/models/iiwa_description:models",
+    ],
+    deps = [
+        ":parsing_py",
+        ":plant_py",
+        ":rational_forward_kinematics_py",
+        "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake:math_py",
+        "//bindings/pydrake/systems:framework_py",
+        "//bindings/pydrake:geometry_py",
+    ],
+)
+
+
+
 add_pybind_coverage_data()
 
 add_lint_tests_pydrake()

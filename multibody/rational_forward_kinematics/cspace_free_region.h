@@ -126,6 +126,12 @@ class CspaceFreeRegion {
   using FilteredCollisionPairs =
       std::unordered_set<drake::SortedPair<ConvexGeometry::Id>>;
 
+  CspaceFreeRegion(const systems::Diagram<double>& diagram,
+                   const multibody::MultibodyPlant<double>* plant,
+                   const geometry::SceneGraph<double>* scene_graph,
+                   SeparatingPlaneOrder plane_order,
+                   CspaceRegionType cspace_region_type);
+
   CspaceFreeRegion(const multibody::MultibodyPlant<double>& plant,
                    const std::vector<const ConvexPolytope*>& link_polytopes,
                    const std::vector<const ConvexPolytope*>& obstacles,
@@ -422,29 +428,21 @@ class CspaceFreeRegion {
     return separating_planes_;
   }
 
-  const std::map<multibody::BodyIndex, std::vector<const ConvexPolytope*>>&
-  link_polytopes() const {
-    return link_polytopes_;
-  }
-
-  // obstacles_[i] is the i'th polytope, fixed to the world.
-  const std::vector<const ConvexPolytope*>& obstacles() const {
-    return obstacles_;
+  const std::map<multibody::BodyIndex, std::vector<ConvexPolytope>>&
+  polytope_geometries() const {
+    return polytope_geometries_;
   }
 
  private:
   RationalForwardKinematics rational_forward_kinematics_;
-  std::map<multibody::BodyIndex, std::vector<const ConvexPolytope*>>
-      link_polytopes_;
-  std::vector<const ConvexPolytope*> obstacles_;
+  const geometry::SceneGraph<double>* scene_graph_;
+  std::map<multibody::BodyIndex, std::vector<ConvexPolytope>>
+      polytope_geometries_;
 
   SeparatingPlaneOrder plane_order_;
   CspaceRegionType cspace_region_type_;
   std::vector<SeparatingPlane> separating_planes_;
 
-  // In the key, the first ConvexGeometry::Id is for the polytope on the
-  // positive side, the second ConvexGeometry::Id is for the one on the negative
-  // side.
   std::unordered_map<SortedPair<ConvexGeometry::Id>, const SeparatingPlane*>
       map_polytopes_to_separating_planes_;
 };
@@ -581,16 +579,10 @@ void AddOuterPolytope(
 /**
  * Given a diagram (which contains the plant and the scene_graph), returns all
  * the convex polytopes.
- * @param[out] link_polytopes The polytopes on the link (not attached to the
- * world) for collision checking.
- * @param[out] obstacles] The polytopes attached to the world for collision
- * checking.
  */
-void GetConvexPolytopes(
+std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     const systems::Diagram<double>& diagram,
     const MultibodyPlant<double>* plant,
-    const geometry::SceneGraph<double>* scene_graph,
-    std::vector<std::unique_ptr<const ConvexPolytope>>* link_polytopes,
-    std::vector<std::unique_ptr<const ConvexPolytope>>* obstacles);
+    const geometry::SceneGraph<double>* scene_graph);
 }  // namespace multibody
 }  // namespace drake

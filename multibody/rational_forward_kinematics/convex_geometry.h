@@ -1,5 +1,6 @@
 #pragma once
 
+#include "drake/common/drake_copyable.h"
 #include "drake/geometry/geometry_ids.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/rational_forward_kinematics/plane_side.h"
@@ -16,6 +17,7 @@ enum class ConvexGeometryType {
 
 class ConvexGeometry {
  public:
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(ConvexGeometry)
   typedef geometry::GeometryId Id;
 
   ConvexGeometryType type() const { return type_; }
@@ -59,10 +61,10 @@ class ConvexGeometry {
                  drake::geometry::GeometryId id);
 
  private:
-  const ConvexGeometryType type_;
+  ConvexGeometryType type_;
   // The index of the body that this geometry is attached to.
-  const drake::multibody::BodyIndex body_index_;
-  const drake::geometry::GeometryId id_;
+  drake::multibody::BodyIndex body_index_;
+  drake::geometry::GeometryId id_;
 };
 
 /**
@@ -71,6 +73,7 @@ class ConvexGeometry {
  */
 class ConvexPolytope : public ConvexGeometry {
  public:
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(ConvexPolytope)
   ConvexPolytope(drake::multibody::BodyIndex body_index,
                  drake::geometry::GeometryId id,
                  const Eigen::Ref<const Eigen::Matrix3Xd>& vertices);
@@ -101,10 +104,10 @@ class ConvexPolytope : public ConvexGeometry {
 
  private:
   // position of all vertices V in the body frame B.
-  const Eigen::Matrix3Xd p_BV_;
+  Eigen::Matrix3Xd p_BV_;
   // The position of the geometry center in the body frame.
   Eigen::Vector3d p_BC_;
-  const Eigen::Matrix3Xd r_B_;
+  Eigen::Matrix3Xd r_B_;
 };
 
 class Cylinder : public ConvexGeometry {
