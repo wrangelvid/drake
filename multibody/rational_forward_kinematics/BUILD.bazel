@@ -32,6 +32,7 @@ drake_cc_package_library(
         ":generate_monomial_basis_util",
         ":plane_side",
         ":rational_forward_kinematics_core",
+        ":redundant_inequality_pruning",
     ],
 )
 
@@ -119,6 +120,11 @@ drake_cc_library(
     ],
     hdrs = [
         "configuration_space_collision_free_region.h",
+    ],
+    tags = [
+        # Don't add this library to "rational_forward_kinematics", as this
+        # library will be replaced by cspace_free_region
+        "exclude_from_package",
     ],
     deps = [
         ":convex_geometry",

@@ -122,7 +122,7 @@ void IiwaTest::AddBox(
       CoulombFriction<double>());
   geometries->emplace_back(std::make_shared<const ConvexPolytope>(
       body_index, geometry_id, GenerateBoxVertices(box_size, X_BG)));
-};
+}
 
 void AddIiwaWithSchunk(const RigidTransformd& X_7S,
                        MultibodyPlant<double>* plant) {

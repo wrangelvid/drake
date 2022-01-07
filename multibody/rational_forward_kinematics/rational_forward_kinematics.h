@@ -38,29 +38,28 @@ class RationalForwardKinematics {
 
   template <typename T>
   struct Pose {
-//    drake::Vector3<T> p_AB;
-      Eigen::Matrix<T,3,1> p_AB;
-//    drake::Matrix3<T> R_AB;
-      Eigen::Matrix<T,3,3> R_AB;
+    //    drake::Vector3<T> p_AB;
+    Eigen::Matrix<T, 3, 1> p_AB;
+    //    drake::Matrix3<T> R_AB;
+    Eigen::Matrix<T, 3, 3> R_AB;
 
     drake::multibody::BodyIndex frame_A_index;
-    int one(){
-        return 1;
-    }
-    drake::math::RigidTransform<drake::symbolic::Expression> asRigidTransformExpression() const{
-        Eigen::Matrix<drake::symbolic::Expression,3,3>  R_AB_expr;
-        R_AB_expr <<
-            R_AB.coeff(0,0).ToExpression(), R_AB.coeff(0,1).ToExpression(), R_AB.coeff(0,2).ToExpression(),
-            R_AB.coeff(1,0).ToExpression(), R_AB.coeff(1,1).ToExpression(), R_AB.coeff(1,2).ToExpression(),
-            R_AB.coeff(2,0).ToExpression(), R_AB.coeff(2,1).ToExpression(), R_AB.coeff(2,2).ToExpression()
-            ;
-        math::RotationMatrix<drake::symbolic::Expression>  R(R_AB_expr);
+    int one() { return 1; }
+    drake::math::RigidTransform<drake::symbolic::Expression>
+    asRigidTransformExpression() const {
+      Eigen::Matrix<drake::symbolic::Expression, 3, 3> R_AB_expr;
+      R_AB_expr << R_AB.coeff(0, 0).ToExpression(),
+          R_AB.coeff(0, 1).ToExpression(), R_AB.coeff(0, 2).ToExpression(),
+          R_AB.coeff(1, 0).ToExpression(), R_AB.coeff(1, 1).ToExpression(),
+          R_AB.coeff(1, 2).ToExpression(), R_AB.coeff(2, 0).ToExpression(),
+          R_AB.coeff(2, 1).ToExpression(), R_AB.coeff(2, 2).ToExpression();
+      math::RotationMatrix<drake::symbolic::Expression> R(R_AB_expr);
 
-        Vector3<drake::symbolic::Expression> p {
-        p_AB.coeff(0).ToExpression(), p_AB.coeff(1).ToExpression(), p_AB.coeff(2).ToExpression()
-        };
-        return drake::math::RigidTransform(R, p);
-    };
+      Vector3<drake::symbolic::Expression> p{p_AB.coeff(0).ToExpression(),
+                                             p_AB.coeff(1).ToExpression(),
+                                             p_AB.coeff(2).ToExpression()};
+      return drake::math::RigidTransform(R, p);
+    }
     // drake::math::RigidTransform<T> asRigidTransform() const{
     //     Eigen::Matrix<T,3,3>  R_AB_expr;
     //     R_AB_expr <<
@@ -73,7 +72,7 @@ class RationalForwardKinematics {
     //     Vector3<T> p {
     //     p_AB.coeff(0), p_AB.coeff(1), p_AB.coeff(2)
     //     };
-        // return drake::math::RigidTransform(R, p);
+    // return drake::math::RigidTransform(R, p);
   };
 
   struct LinkPoints {

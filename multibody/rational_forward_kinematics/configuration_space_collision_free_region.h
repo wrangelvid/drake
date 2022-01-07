@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -192,7 +193,7 @@ class ConfigurationSpaceCollisionFreeRegion {
    * <= d is collision free.
    */
   struct ConstructProgramReturn {
-    ConstructProgramReturn(size_t rationals_size)
+    explicit ConstructProgramReturn(size_t rationals_size)
         : prog{new solvers::MathematicalProgram()},
           lagrangians{rationals_size},
           verified_polynomials{rationals_size} {}
