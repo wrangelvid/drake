@@ -4,13 +4,13 @@
 #include "fmt/format.h"
 #include "fmt/ostream.h"
 #include "pybind11/eigen.h"
-#include "pybind11/eval.h"
 #include "pybind11/operators.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
+#include "drake/bindings/pydrake/symbolic_py_unapply.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
 #include "drake/common/symbolic_decompose.h"
 
@@ -346,6 +346,12 @@ PYBIND11_MODULE(symbolic, m) {
           "__copy__", [](const Expression& self) -> Expression { return self; })
       .def("get_kind", &Expression::get_kind, doc.Expression.get_kind.doc)
       .def("to_string", &Expression::to_string, doc.Expression.to_string.doc)
+      .def(
+          "Unapply",
+          [m](const symbolic::Expression& e) {
+            return internal::Unapply(m, e);
+          },
+          internal::kUnapplyExpressionDoc)
       .def("Expand", &Expression::Expand, doc.Expression.Expand.doc)
       .def(
           "Evaluate",
@@ -543,6 +549,10 @@ PYBIND11_MODULE(symbolic, m) {
   formula_cls.def(py::init<>(), doc.Expression.ctor.doc_0args)
       .def(py::init<const Variable&>(), py::arg("var"),
           doc.Expression.ctor.doc_1args_var)
+      .def(
+          "Unapply",
+          [m](const symbolic::Formula& f) { return internal::Unapply(m, f); },
+          internal::kUnapplyFormulaDoc)
       .def("get_kind", &Formula::get_kind, doc.Formula.get_kind.doc)
       .def("GetFreeVariables", &Formula::GetFreeVariables,
           doc.Formula.GetFreeVariables.doc)

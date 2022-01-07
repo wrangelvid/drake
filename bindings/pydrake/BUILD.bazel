@@ -253,8 +253,8 @@ drake_pybind_library(
     ],
     cc_srcs = [
         "symbolic_py.cc",
-        "symbolic_py_deconstruct.cc",
-        "symbolic_py_deconstruct.h",
+        "symbolic_py_unapply.cc",
+        "symbolic_py_unapply.h",
     ],
     package_info = PACKAGE_INFO,
     py_deps = [

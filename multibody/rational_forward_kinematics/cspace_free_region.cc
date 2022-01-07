@@ -871,7 +871,7 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
         verified_gram_vars, separating_plane_vars, t_lower, t_upper,
         verification_option, &P, &q);
-    prog_lagrangian->AddMaximizeLogDeterminantSymmetricMatrixCost(
+    prog_lagrangian->AddMaximizeLogDeterminantCost(
         P.cast<symbolic::Expression>());
     const auto result_lagrangian =
         solvers::Solve(*prog_lagrangian, std::nullopt, solver_options);
