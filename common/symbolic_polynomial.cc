@@ -43,11 +43,11 @@ void DoAddProduct(const Expression& coeff, const Monomial& m,
     // Without expanding the terms, we have `is_zero(c1 + c2) = false` while
     // it's clear that c1 + c2 is a zero polynomial. Using `Expand()` help us
     // identify those cases.
-    if (is_zero(existing_coeff.Expand() + coeff.Expand())) {
-      map->erase(it);
-    } else {
+    //if (is_zero(existing_coeff.Expand() + coeff.Expand())) {
+    //  map->erase(it);
+    //} else {
       existing_coeff += coeff;
-    }
+    //}
   } else {
     // m ∉ dom(map)
     map->emplace_hint(it, m, coeff);
