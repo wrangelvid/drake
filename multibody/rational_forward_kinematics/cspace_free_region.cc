@@ -1,6 +1,8 @@
 #include "drake/multibody/rational_forward_kinematics/cspace_free_region.h"
 
+#include <algorithm>
 #include <limits>
+#include <optional>
 
 #include <fmt/format.h>
 

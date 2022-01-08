@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
@@ -220,8 +221,8 @@ ConfigurationSpaceCollisionFreeRegion::GenerateLinkOnOneSideOfPlaneRationals(
                                                      obstacle->get_id()))
                                 ->second->a;
           Eigen::Vector3d p_AC;
-          // find the positions of the center of B (which are expressed in frameB)
-          // expressed in the frame A
+          // find the positions of the center of B (which are expressed in
+          // frameB) expressed in the frame A
           rational_forward_kinematics_.plant().CalcPointsPositions(
               *context_not_in_collision,
               rational_forward_kinematics_.plant()

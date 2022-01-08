@@ -163,7 +163,7 @@ class CspaceFreeRegion {
    * verify the C-space region C * t <= d is collision free.
    */
   struct CspacePolytopeProgramReturn {
-    CspacePolytopeProgramReturn(size_t rationals_size)
+    explicit CspacePolytopeProgramReturn(size_t rationals_size)
         : prog{new solvers::MathematicalProgram()},
           polytope_lagrangians{rationals_size},
           t_lower_lagrangians{rationals_size},

@@ -102,13 +102,10 @@ std::unique_ptr<MultibodyPlant<double>> ConstructDualArmIiwaPlant(
 
 IiwaTest::IiwaTest()
     : iiwa_(ConstructIiwaPlant("iiwa14_no_collision.sdf", false)),
-      iiwa_tree_(drake::multibody::internal::GetInternalTree(*iiwa_)),
       world_{iiwa_->world_body().index()} {
   for (int i = 0; i < 8; ++i) {
     iiwa_link_[i] =
         iiwa_->GetBodyByName("iiwa_link_" + std::to_string(i)).index();
-    iiwa_joint_[i] =
-        iiwa_tree_.get_topology().get_body(iiwa_link_[i]).inboard_mobilizer;
   }
 }
 
@@ -122,7 +119,19 @@ void IiwaTest::AddBox(
       CoulombFriction<double>());
   geometries->emplace_back(std::make_shared<const ConvexPolytope>(
       body_index, geometry_id, GenerateBoxVertices(box_size, X_BG)));
-};
+}
+
+FinalizedIiwaTest::FinalizedIiwaTest()
+    : iiwa_(ConstructIiwaPlant("iiwa14_no_collision.sdf", true)),
+      iiwa_tree_(drake::multibody::internal::GetInternalTree(*iiwa_)),
+      world_{iiwa_->world_body().index()} {
+  for (int i = 0; i < 8; ++i) {
+    iiwa_link_[i] =
+        iiwa_->GetBodyByName("iiwa_link_" + std::to_string(i)).index();
+    iiwa_joint_[i] =
+        iiwa_tree_.get_topology().get_body(iiwa_link_[i]).inboard_mobilizer;
+  }
+}
 
 void AddIiwaWithSchunk(const RigidTransformd& X_7S,
                        MultibodyPlant<double>* plant) {
