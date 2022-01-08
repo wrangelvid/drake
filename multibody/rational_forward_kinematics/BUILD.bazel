@@ -209,6 +209,7 @@ drake_cc_googletest(
 
 drake_cc_googletest(
     name = "convex_geometry_test",
+    size = "medium",
     deps = [
         ":convex_geometry",
         "//common/test_utilities:eigen_matrix_compare",

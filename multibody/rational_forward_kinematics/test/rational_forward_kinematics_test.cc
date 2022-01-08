@@ -240,7 +240,7 @@ void CheckLinkKinematics(
   }
 }
 
-TEST_F(IiwaTest, CalcLinkPoses) {
+TEST_F(FinalizedIiwaTest, CalcLinkPoses) {
   RationalForwardKinematics rational_forward_kinematics(*iiwa_);
   EXPECT_EQ(rational_forward_kinematics.t().rows(), 7);
 
@@ -363,7 +363,7 @@ void CheckFindTOnPath(
   }
 }
 
-TEST_F(IiwaTest, FindTOnPath) {
+TEST_F(FinalizedIiwaTest, FindTOnPath) {
   RationalForwardKinematics rational_forward_kinematics(*iiwa_);
 
   CheckFindTOnPath(rational_forward_kinematics, world_, iiwa_link_[0], {});

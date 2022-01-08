@@ -33,6 +33,9 @@ ConstructDualArmIiwaPlant(
     drake::multibody::ModelInstanceIndex* left_iiwa_instance,
     drake::multibody::ModelInstanceIndex* right_iiwa_instance);
 
+/** The iiwa plant here is not finalized, so that the user can add more
+ * collision geometries.
+ */
 class IiwaTest : public ::testing::Test {
  public:
   IiwaTest();
@@ -41,6 +44,19 @@ class IiwaTest : public ::testing::Test {
               const Eigen::Vector3d& box_size, BodyIndex body_index,
               const std::string& name,
               std::vector<std::shared_ptr<const ConvexPolytope>>* geometries);
+
+ protected:
+  std::unique_ptr<drake::multibody::MultibodyPlant<double>> iiwa_;
+  const drake::multibody::BodyIndex world_;
+  std::array<drake::multibody::BodyIndex, 8> iiwa_link_;
+};
+
+/**
+ * The iiwa plant is finalized at the test construction.
+ */
+class FinalizedIiwaTest : public ::testing::Test {
+ public:
+  FinalizedIiwaTest();
 
  protected:
   std::unique_ptr<drake::multibody::MultibodyPlant<double>> iiwa_;

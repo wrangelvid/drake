@@ -48,7 +48,7 @@ void CheckChildInReshuffledBody(const MultibodyTree<double>& tree,
             GetInboardMobilizer(tree, inboard_mobilizer_body));
 }
 
-TEST_F(IiwaTest, TestAddChildrenToReshuffledBodyWithWorldAsRoot) {
+TEST_F(FinalizedIiwaTest, TestAddChildrenToReshuffledBodyWithWorldAsRoot) {
   ReshuffledBody reshuffled_world(world_, nullptr, nullptr);
   std::unordered_set<BodyIndex> visited;
   visited.emplace(world_);
@@ -85,7 +85,7 @@ TEST_F(IiwaTest, TestAddChildrenToReshuffledBodyWithWorldAsRoot) {
                 {world_, iiwa_link_[0], iiwa_link_[1], iiwa_link_[2]}));
 }
 
-TEST_F(IiwaTest, TestAddChildrenToReshuffledBodyWithLink3AsRoot) {
+TEST_F(FinalizedIiwaTest, TestAddChildrenToReshuffledBodyWithLink3AsRoot) {
   ReshuffledBody reshuffled_link_3(iiwa_link_[3], nullptr, nullptr);
   std::unordered_set<BodyIndex> visited;
   visited.insert(iiwa_link_[3]);
@@ -138,7 +138,7 @@ TEST_F(IiwaTest, TestAddChildrenToReshuffledBodyWithLink3AsRoot) {
                           iiwa_link_[3], iiwa_link_[4]}));
 }
 
-TEST_F(IiwaTest, TestReshuffleKinematicsTreeWithWorldAsRoot) {
+TEST_F(FinalizedIiwaTest, TestReshuffleKinematicsTreeWithWorldAsRoot) {
   ReshuffledBody reshuffled_world(world_, nullptr, nullptr);
   ReshuffleKinematicsTree(*iiwa_, &reshuffled_world);
 
@@ -164,7 +164,7 @@ TEST_F(IiwaTest, TestReshuffleKinematicsTreeWithWorldAsRoot) {
   EXPECT_EQ(reshuffled_link_i->children.size(), 0);
 }
 
-TEST_F(IiwaTest, TestReshuffleKinematicsTreeWithLink3AsRoot) {
+TEST_F(FinalizedIiwaTest, TestReshuffleKinematicsTreeWithLink3AsRoot) {
   ReshuffledBody reshuffled_link_3(iiwa_link_[3], nullptr, nullptr);
   ReshuffleKinematicsTree(*iiwa_, &reshuffled_link_3);
   EXPECT_EQ(reshuffled_link_3.body_index, iiwa_link_[3]);
@@ -195,7 +195,7 @@ TEST_F(IiwaTest, TestReshuffleKinematicsTreeWithLink3AsRoot) {
   EXPECT_EQ(reshuffled_link_i->children.size(), 0);
 }
 
-TEST_F(IiwaTest, FindShortestPath) {
+TEST_F(FinalizedIiwaTest, FindShortestPath) {
   auto path = FindShortestPath(*iiwa_, world_, iiwa_link_[7]);
   EXPECT_EQ(path, std::vector<BodyIndex>({world_, iiwa_link_[0], iiwa_link_[1],
                                           iiwa_link_[2], iiwa_link_[3],
@@ -219,7 +219,7 @@ TEST_F(IiwaTest, FindShortestPath) {
                                     iiwa_link_[0], world_}));
 }
 
-TEST_F(IiwaTest, FindBodyInTheMiddleOfChain) {
+TEST_F(FinalizedIiwaTest, FindBodyInTheMiddleOfChain) {
   EXPECT_EQ(FindBodyInTheMiddleOfChain(*iiwa_, iiwa_link_[0], iiwa_link_[1]),
             iiwa_link_[1]);
   EXPECT_EQ(FindBodyInTheMiddleOfChain(*iiwa_, iiwa_link_[1], iiwa_link_[0]),
@@ -240,7 +240,7 @@ TEST_F(IiwaTest, FindBodyInTheMiddleOfChain) {
             iiwa_link_[3]);
 }
 
-TEST_F(IiwaTest, FindMobilizersOnShortestPath) {
+TEST_F(FinalizedIiwaTest, FindMobilizersOnShortestPath) {
   EXPECT_EQ(FindMobilizersOnShortestPath(*iiwa_, iiwa_link_[0], iiwa_link_[1]),
             std::vector<MobilizerIndex>({iiwa_joint_[1]}));
 
