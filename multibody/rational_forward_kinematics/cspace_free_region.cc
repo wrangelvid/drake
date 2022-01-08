@@ -36,7 +36,7 @@ struct DirectedKinematicsChainHash {
 
 // map the kinematics chain to monomial_basis.
 // If the separating plane has affine order, then the polynomial we want to
-// verify (in the numerator of 1 - aᵀ(x−c) or aᵀ(x−c)-1) only contains the
+// verify (in the numerator of 1-aᵀx-b or aᵀx+b-1) only contains the
 // monomials tⱼ * ∏(tᵢ, dᵢ), where tᵢ is a t on the "half chain" from the
 // expressed frame to either the link or the obstacle, and dᵢ<=2. Namely at
 // most one variable has degree 3, all the other variables have degree <= 2.
@@ -833,6 +833,43 @@ CspaceFreeRegion::ConstructPolytopeProgram(
   return prog;
 }
 
+namespace {
+// In bilinear alternation, each conic program (with a linear cost) finds an
+// optimal solution at the boundary of the cone. Namely the solution is very
+// close to being infeasible, which is a bad starting point for the next conic
+// program in alternation, as the next conic program can be regarded infeasible
+// due to numerical problems. To resolve this issue, we solve a feasibility
+// problem (with no cost) that finds a strictly feasible solution at the
+// interior of the cone.
+// @param cost_val is the optimal cost of the optimization program (which
+// minimizes `linear_cost`).
+solvers::MathematicalProgramResult BackoffProgram(
+    solvers::MathematicalProgram* prog,
+    const solvers::Binding<solvers::LinearCost>& linear_cost, double cost_val,
+    double backoff_scale, const solvers::SolverOptions& solver_options) {
+  prog->RemoveCost(linear_cost);
+  if (backoff_scale <= 0) {
+    throw std::invalid_argument(
+        fmt::format("backoff_scale = {}, only back off when backoff_scale > 0",
+                    backoff_scale));
+  }
+  // If cost_val > 0, then we impose the constraint cost(vars) <= (1 +
+  // backoff_scale) * cost_val; otherwise we impose the constraint cost(vars) <=
+  // (1 - backoff_scale) * cost_val;
+  const double upper_bound =
+      cost_val > 0
+          ? (1 + backoff_scale) * cost_val - linear_cost.evaluator()->b()
+          : (1 - backoff_scale) * cost_val - linear_cost.evaluator()->b();
+  prog->AddLinearConstraint(linear_cost.evaluator()->a(), -kInf, upper_bound,
+                            linear_cost.variables());
+  const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+  if (!result.is_success()) {
+    throw std::runtime_error("Backoff fails.");
+  }
+  return result;
+}
+}  // namespace
+
 void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
     const CspaceFreeRegion::FilteredCollisionPairs& filtered_collision_pairs,
@@ -843,6 +880,17 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     const solvers::SolverOptions& solver_options, Eigen::MatrixXd* C_final,
     Eigen::VectorXd* d_final, Eigen::MatrixXd* P_final,
     Eigen::VectorXd* q_final) const {
+  if (bilinear_alternation_option.lagrangian_backoff_scale < 0) {
+    throw std::invalid_argument(
+        fmt::format("lagrangian_backoff_scale={}, should be non-negative",
+                    bilinear_alternation_option.lagrangian_backoff_scale));
+  }
+  if (bilinear_alternation_option.polytope_backoff_scale < 0 ||
+      bilinear_alternation_option.polytope_backoff_scale > 1) {
+    throw std::invalid_argument(
+        fmt::format("polytope_backoff_scale={}, should be within [0, 1]",
+                    bilinear_alternation_option.polytope_backoff_scale));
+  }
   const int C_rows = C_init.rows();
   DRAKE_DEMAND(d_init.rows() == C_rows);
   DRAKE_DEMAND(C_init.cols() == rational_forward_kinematics_.t().rows());
@@ -883,9 +931,10 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
         verified_gram_vars, separating_plane_vars, t_lower, t_upper,
         verification_option, &P, &q);
-    prog_lagrangian->AddMaximizeLogDeterminantCost(
-        P.cast<symbolic::Expression>());
-    const auto result_lagrangian =
+    auto [log_det_cost, log_det_t, log_det_Z] =
+        prog_lagrangian->AddMaximizeLogDeterminantCost(
+            P.cast<symbolic::Expression>());
+    auto result_lagrangian =
         solvers::Solve(*prog_lagrangian, std::nullopt, solver_options);
     if (!result_lagrangian.is_success()) {
       throw std::runtime_error(
@@ -895,7 +944,17 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
       std::cout << fmt::format("Iter: {}, max(log(det(P)))={}\n", iter_count,
                                -result_lagrangian.get_optimal_cost());
     }
-    // TODO(hongkai.dai): backoff the lagrangian step result.
+    if (bilinear_alternation_option.lagrangian_backoff_scale > 0) {
+      result_lagrangian = BackoffProgram(
+          prog_lagrangian.get(), log_det_cost,
+          result_lagrangian.get_optimal_cost(),
+          bilinear_alternation_option.lagrangian_backoff_scale, solver_options);
+      if (bilinear_alternation_option.verbose) {
+        std::cout << fmt::format(
+            "backoff with log(det(P)) {}\n",
+            -result_lagrangian.EvalBinding(log_det_cost)(0));
+      }
+    }
     const Eigen::VectorXd lagrangian_gram_var_vals =
         result_lagrangian.GetSolution(lagrangian_gram_vars);
     const auto P_sol = result_lagrangian.GetSolution(P);
@@ -925,20 +984,15 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
       std::cout << fmt::format("Iter: {}, polytope step cost {}\n", iter_count,
                                result_polytope.get_optimal_cost());
     }
-    if (bilinear_alternation_option.backoff_scale > 0) {
-      const auto margin_sum_max = -result_polytope.get_optimal_cost();
-      prog_polytope->RemoveCost(prog_polytope_cost);
-      // Now add the constraint margin.sum() >= (1-backoff_scale) *
-      // margin_sum_max.
-      prog_polytope->AddLinearConstraint(
-          Eigen::VectorXd::Ones(margin.rows()),
-          (1 - bilinear_alternation_option.backoff_scale) * margin_sum_max,
-          kInf, margin);
-      result_polytope =
-          solvers::Solve(*prog_polytope, std::nullopt, solver_options);
-      if (!result_polytope.is_success()) {
-        throw std::runtime_error(fmt::format(
-            "Failed to backoff polytope program in iteration {}", iter_count));
+    if (bilinear_alternation_option.polytope_backoff_scale > 0) {
+      result_polytope = BackoffProgram(
+          prog_polytope.get(), prog_polytope_cost,
+          result_polytope.get_optimal_cost(),
+          bilinear_alternation_option.polytope_backoff_scale, solver_options);
+      if (bilinear_alternation_option.verbose) {
+        std::cout << fmt::format(
+            "back off, cost: {}\n",
+            result_polytope.EvalBinding(prog_polytope_cost)(0));
       }
     }
     C_val = result_polytope.GetSolution(C_var);

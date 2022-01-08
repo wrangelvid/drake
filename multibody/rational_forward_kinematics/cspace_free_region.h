@@ -366,8 +366,14 @@ class CspaceFreeRegion {
     /** Backoff the optimization program to search for a strictly feasible
      * solution not on the boundary of the feasible region. backoff_scale = 0
      * means no backoff, backoff_scale should be a non-negative number.
+     * lagrangian_backoff_scale is for the "Lagrangian step", when we search for
+     * the Lagrangian and the inscribed ellipsoid given the polytopic region
+     * C*t<=d. polytope_backoff_scale is for the "polytope step", when we search
+     * for the polytopic region C*t<=d given the Lagrangian and the inscribed
+     * ellipsoid.
      */
-    double backoff_scale{0.};
+    double lagrangian_backoff_scale{0.};
+    double polytope_backoff_scale{0.};
     int verbose{true};
   };
 

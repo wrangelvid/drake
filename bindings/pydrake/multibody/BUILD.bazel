@@ -222,8 +222,8 @@ drake_py_library(
 
 install(
     name = "install",
-    py_dest = PACKAGE_INFO.py_dest,
     targets = PY_LIBRARIES + [":all_py"],
+    py_dest = PACKAGE_INFO.py_dest,
     deps = get_drake_py_installs(PY_LIBRARIES_WITH_INSTALL),
 )
 
@@ -334,14 +334,12 @@ drake_py_unittest(
         ":parsing_py",
         ":plant_py",
         ":rational_forward_kinematics_py",
-        "//bindings/pydrake/common/test_utilities",
-        "//bindings/pydrake:math_py",
-        "//bindings/pydrake/systems:framework_py",
         "//bindings/pydrake:geometry_py",
+        "//bindings/pydrake:math_py",
+        "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/systems:framework_py",
     ],
 )
-
-
 
 add_pybind_coverage_data()
 

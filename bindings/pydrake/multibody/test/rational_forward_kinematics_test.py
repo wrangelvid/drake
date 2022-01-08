@@ -157,7 +157,9 @@ class IiwaCspaceTest(unittest.TestCase):
         q_star, C_init, d_init = self.construct_initial_cspace_polytope(dut)
         filtered_collision_pairs = set()
         bilinear_alternation_option = mut.BilinearAlternationOption()
-        bilinear_alternation_option.max_iters = 1
+        bilinear_alternation_option.max_iters = 2
+        bilinear_alternation_option.lagrangian_backoff_scale = 0.01
+        bilinear_alternation_option.polytope_backoff_scale = 0.05
         solver_options = mp.SolverOptions()
         C_final, d_final, P_final, q_final = \
             dut.CspacePolytopeBilinearAlternation(

@@ -18,21 +18,20 @@ namespace pydrake {
 
 template <typename T>
 
-void DoPoseDeclaration(py::module m, T)    {
-    using namespace drake::multibody;
-    py::tuple param = GetPyParam<T>();
-    using Class = RationalForwardKinematics::Pose<T>;
-    auto cls = DefineTemplateClassWithDefault<Class>(m, "RationalForwardKinematicsPose", param);
-    cls
-        .def("translation", [](const Class& self) {return self.p_AB;})
-        .def("rotation", [](const Class& self) {return self.R_AB;})
-        .def_readwrite(
-            "frame_A_index", &RationalForwardKinematics::Pose<T>::frame_A_index)
-        .def("asRigidTransformExpr", [](const Class& self) {return self.asRigidTransformExpression();});
+void DoPoseDeclaration(py::module m, T) {
+  py::tuple param = GetPyParam<T>();
+  using Class = multibody::RationalForwardKinematics::Pose<T>;
+  auto cls = DefineTemplateClassWithDefault<Class>(
+      m, "RationalForwardKinematicsPose", param);
+  cls.def("translation", [](const Class& self) { return self.p_AB; })
+      .def("rotation", [](const Class& self) { return self.R_AB; })
+      .def_readwrite("frame_A_index",
+          &multibody::RationalForwardKinematics::Pose<T>::frame_A_index)
+      .def("asRigidTransformExpr",
+          [](const Class& self) { return self.asRigidTransformExpression(); });
 
-
-    DefCopyAndDeepCopy(&cls);
-  }
+  DefCopyAndDeepCopy(&cls);
+}
 
 PYBIND11_MODULE(rational_forward_kinematics, m) {
   // NOLINTNEXTLINE(build/namespaces): Emulate placement in namespace.
@@ -107,7 +106,6 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
       py::arg("start"), py::arg("end"));
 
   // Pose
-  using namespace drake::multibody;
   constexpr auto& doc = pydrake_doc.drake.multibody;
   py::class_<multibody::ConvexPolytope>(
       m, "ConvexPolytope", doc.ConvexPolytope.doc)
@@ -199,9 +197,15 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
       .def_readwrite("convergence_tol",
           &CspaceFreeRegion::BilinearAlternationOption::convergence_tol,
           doc.CspaceFreeRegion.BilinearAlternationOption.convergence_tol.doc)
-      .def_readwrite("backoff_scale",
-          &CspaceFreeRegion::BilinearAlternationOption::backoff_scale,
-          doc.CspaceFreeRegion.BilinearAlternationOption.backoff_scale.doc)
+      .def_readwrite("lagrangian_backoff_scale",
+          &CspaceFreeRegion::BilinearAlternationOption::
+              lagrangian_backoff_scale,
+          doc.CspaceFreeRegion.BilinearAlternationOption
+              .lagrangian_backoff_scale.doc)
+      .def_readwrite("polytope_backoff_scale",
+          &CspaceFreeRegion::BilinearAlternationOption::polytope_backoff_scale,
+          doc.CspaceFreeRegion.BilinearAlternationOption.polytope_backoff_scale
+              .doc)
       .def_readwrite("verbose",
           &CspaceFreeRegion::BilinearAlternationOption::verbose,
           doc.CspaceFreeRegion.BilinearAlternationOption.verbose.doc);
