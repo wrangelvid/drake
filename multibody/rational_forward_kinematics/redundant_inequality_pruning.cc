@@ -11,24 +11,24 @@ const double kInf = std::numeric_limits<double>::infinity();
 
 std::vector<int> FindRedundantInequalitiesInHPolyhedronByIndex(
     const Eigen::Ref<const Eigen::MatrixXd>& C,
-    const Eigen::Ref<const Eigen::VectorXd>& d) {
+    const Eigen::Ref<const Eigen::VectorXd>& d, double tighten) {
   const int num_inequalities = C.rows();
   const int num_vars = C.cols();
 
-  std::list<int> kept_indices;
+  std::unordered_set<int> kept_indices;
   for (int i = 0; i < num_inequalities; i++) {
-    kept_indices.push_back(i);
+    kept_indices.emplace(i);
   }
 
-  std::list<int> excluded_indices(0);
+  std::vector<int> excluded_indices(0);
 
   for (int excluded_index = 0; excluded_index < num_inequalities;
        excluded_index++) {
     solvers::MathematicalProgram prog;
     solvers::VectorXDecisionVariable x =
         prog.NewContinuousVariables(num_vars, "x");
-    std::list<int> cur_kept_indices = kept_indices;
-    cur_kept_indices.remove(excluded_index);
+    std::unordered_set<int> cur_kept_indices = kept_indices;
+    cur_kept_indices.erase(excluded_index);
 
     // constraint c^Tx <= d+1
     prog.AddLinearConstraint(
@@ -50,14 +50,12 @@ std::vector<int> FindRedundantInequalitiesInHPolyhedronByIndex(
       return std::vector<int>{};
     }
 
-    // should I add an argument to make this stricter/more relaxed?
-    if (-result.get_optimal_cost() <= d(excluded_index)) {
+    if (-result.get_optimal_cost() <= d(excluded_index) - tighten) {
       excluded_indices.push_back(excluded_index);
-      kept_indices.remove(excluded_index);
+      kept_indices.erase(excluded_index);
     }
   }
-  std::vector<int> ret(excluded_indices.begin(), excluded_indices.end());
-  return ret;
+  return excluded_indices;
 }
 
 }  // namespace multibody
