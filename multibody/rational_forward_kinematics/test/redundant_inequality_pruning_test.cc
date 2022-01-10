@@ -46,6 +46,23 @@ GTEST_TEST(RedundantHyperplaneInequalities, PruneSimpleBoundingBox2) {
   EXPECT_TRUE(redundant_indices == redundant_indices_expected);
 }
 
+GTEST_TEST(RedundantHyperplaneInequalities, RemoveWithTighten) {
+  Eigen::Matrix<double, 5, 2> A;
+  // clang-format off
+  A << 1, 0,
+       0, 1,
+       -1, 0,
+       0, -1,
+       1, 0;
+  // clang-format on
+  Eigen::Matrix<double, 5, 1> b;
+  b << 1, 1, 1, 1, 0.5;
+  // With tighten=0, the first constraint x(0) <= 1 is redundant.
+  EXPECT_EQ(FindRedundantInequalitiesInHPolyhedronByIndex(A, b, 0.), std::vector<int>({0}));
+  // with tighten = 0.6, none of the constraint is redundant.
+  EXPECT_EQ(FindRedundantInequalitiesInHPolyhedronByIndex(A, b, 0.6).size(), 0);
+}
+
 }  // namespace
 }  // namespace multibody
 }  // namespace drake
