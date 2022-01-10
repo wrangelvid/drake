@@ -851,8 +851,10 @@ TEST_F(IiwaCspaceTest, CspacePolytopeBilinearAlternation) {
   const CspaceFreeRegion::BilinearAlternationOption
       bilinear_alternation_options{.max_iters = 3,
                                    .convergence_tol = 0.001,
-                                   .backoff_scale = 0.05,
+                                   .lagrangian_backoff_scale = 0.05,
+                                   .polytope_backoff_scale = 0.05,
                                    .verbose = true};
+  // TODO: what should the above backoff scales actually be?
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, true);
   dut.CspacePolytopeBilinearAlternation(
