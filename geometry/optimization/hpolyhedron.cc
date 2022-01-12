@@ -177,6 +177,37 @@ bool HPolyhedron::DoIsBounded() const {
   return result.is_success();
 }
 
+//TODO: need to add tests for this
+bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron other) const {
+  DRAKE_DEMAND(other.A().rows() == A_.rows());
+  const double kInf = std::numeric_limits<double>::infinity();
+  solvers::MathematicalProgram prog;
+  solvers::VectorXDecisionVariable x =
+        prog.NewContinuousVariables(A_.rows(), "x");
+  prog.AddLinearConstraint(
+        A_, Eigen::VectorXd::Constant(b_.rows(), -kInf),
+        b_, x);
+  Binding<solvers::LinearConstraint> redundant_constraint_binding = prog.AddLinearConstraint(
+      other.A().row(0), Eigen::VectorXd::Constant(1, -kInf), other.b().row(0), x
+      );
+  Binding<solvers::LinearCost> program_cost_binding =
+      prog.AddLinearCost(-other.A().row(0), 0, x);
+
+  for(int i = 0; i < other.A().rows(); i++){
+    redundant_constraint_binding.evaluator()->UpdateCoefficients(
+        other.A().row(i), Eigen::VectorXd::Constant(1, -kInf),
+        other.b().row(i) + Eigen::VectorXd::Ones(1));
+    program_cost_binding.evaluator()->UpdateCoefficients(-other.A().row(0), 0);
+    auto result = solvers::Solve(prog);
+
+    // constraints define an empty set or the current inequality of other is not redundant
+    if(!result.is_success() or -result.get_optimal_cost() > other.b()(i)){
+      return false;
+    }
+  }
+  return true;
+}
+
 bool HPolyhedron::DoPointInSet(const Eigen::Ref<const VectorXd>& x,
                                double tol) const {
   DRAKE_DEMAND(A_.cols() == x.size());

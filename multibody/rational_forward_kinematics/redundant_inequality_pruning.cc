@@ -50,6 +50,7 @@ std::vector<int> FindRedundantInequalitiesInHPolyhedronByIndex(
       return std::vector<int>{};
     }
 
+    // the current inequality is redundant
     if (-result.get_optimal_cost() <= d(excluded_index) - tighten) {
       excluded_indices.push_back(excluded_index);
       kept_indices.erase(excluded_index);

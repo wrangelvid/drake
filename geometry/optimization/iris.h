@@ -9,6 +9,8 @@
 #include "drake/geometry/optimization/convex_set.h"
 #include "drake/geometry/optimization/hpolyhedron.h"
 #include "drake/multibody/plant/multibody_plant.h"
+#include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics.h"
+
 
 namespace drake {
 namespace geometry {
@@ -144,6 +146,90 @@ HPolyhedron IrisInConfigurationSpace(
     const systems::Context<double>& context,
     const Eigen::Ref<const Eigen::VectorXd>& sample,
     const IrisOptions& options = IrisOptions());
+
+// TODO: is this the proper way to redefine these options?
+struct IrisOptionsRationalSpace {
+  IrisOptionsRationalSpace() = default;
+
+  /** The initial polytope is guaranteed to contain the point if that point is
+  collision-free. However, the IRIS alternation objectives do not include (and
+  can not easily include) a constraint that the original sample point is
+  contained. Therefore, the IRIS paper recommends that if containment is a
+  requirement, then the algorithm should simply terminate early if alternations
+  would ever cause the set to not contain the point. */
+  bool require_sample_point_is_contained{false};
+
+  /** Maximum number of iterations. */
+  int iteration_limit{100};
+
+  /** IRIS will terminate if the change in the *volume* of the hyperellipsoid
+  between iterations is less that this threshold. This termination condition can
+  be disabled by setting to a negative value. */
+  double termination_threshold{2e-2};  // from rdeits/iris-distro.
+
+  /** IRIS will terminate if the change in the *volume* of the hyperellipsoid
+  between iterations is less that this percent of the previouse best volume.
+  This termination condition can be disabled by setting to a negative value. */
+  double relative_termination_threshold{1e-3};  // from rdeits/iris-distro.
+
+  // TODO(russt): Improve the implementation so that we can clearly document the
+  // units for this margin.
+  /** For IRIS in configuration space, we retreat by this margin from each
+  C-space obstacle in order to avoid the possibility of requiring an infinite
+  number of faces to approximate a curved boundary.
+  */
+  double configuration_space_margin{1e-2};
+
+  /** For IRIS in configuration space, we can certify that the regions are truly
+   * collision free using SOS programming at the methods in
+   * multibody/rational_forward_kinematics. Whether to do the certification
+   * steps in the loop or not is an option*/
+  bool certify_region_during_generation = false;
+
+  /** For IRIS in configuration space, we can certify that the regions are truly
+   * collision free using SOS programming at the methods in
+   * multibody/rational_forward_kinematics. We can do the certification
+   * adjustments at one time at the end
+   * // TODO: enforce that only one of certify_region_during_generation and
+   * certify_region_after_generation is true
+   * */
+  bool certify_region_after_generation = true;
+};
+
+/** A variation of the Iris (Iterative Region Inflation by Semidefinite
+programming) algorithm which finds collision-free regions in the *rational
+parametrization of the configuration space* of @p plant. @see Iris for details
+on the original algorithm. This is a reimplementation of
+IrisInConfigurationSpace for the rational reparametrization
+
+@param plant describes the kinematics of configuration space.  It must be
+connected to a SceneGraph in a systems::Diagram.
+@param context is a context of the @p plant. The context must have the positions
+of the plant set to the initialIRIS seed configuration.
+@param q_star is the point from which the stereographic projection is computed
+@param C0 initial limits for HPolyhedron Ct <= d that we will return
+@param d0 initial limits for HPolyhedron Ct <= d  that we will return
+@param options provides additional configuration options.  In particular,
+`options.certify_region_during_generation` vs
+`options.certify_region_after_generation' can have an impact on computation time
+
+@ingroup geometry_optimization
+*/
+HPolyhedron IrisInRationalConfigurationSpace(
+    const multibody::MultibodyPlant<double>& plant,
+    const systems::Context<double>& context,
+    const Eigen::Ref<const Eigen::VectorXd>&
+        q_star,  // TODO should this be in options?
+    const HPolyhedron starting_hpolyhedron,
+    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
+
+// Same method but start the polyhedron guess at the joint limits.
+HPolyhedron IrisInRationalConfigurationSpace(
+    const multibody::MultibodyPlant<double>& plant,
+    const systems::Context<double>& context,
+    const Eigen::Ref<const Eigen::VectorXd>&
+        q_star,  // TODO should this be in options?
+    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
 
 }  // namespace optimization
 }  // namespace geometry

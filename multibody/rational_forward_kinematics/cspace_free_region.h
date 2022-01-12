@@ -81,6 +81,8 @@ struct VerificationOption {
  * side of the plane. If the link is on the positive side of the plane, then the
  * rational is aᵀx + b - 1, otherwise it is -1 - aᵀx - b
  */
+ //TODO: why does this have the other_side_link_polytope? Isn't the requirement
+ // that a link vertex be on a desired side of a plane independent of the other polytope?
 struct LinkVertexOnPlaneSideRational {
   LinkVertexOnPlaneSideRational(
       symbolic::RationalFunction m_rational,
@@ -223,7 +225,7 @@ class CspaceFreeRegion {
     // aᵀx+b-1 or -1-aᵀx-b
     symbolic::Polynomial rational_numerator;
     // lagrangian_gram_var.segment(polytope_lagrangian_gram_lower_start,
-    // n(n+1)/2) is the low diagonal entries of the gram matrix in
+    // n(n+1)/2) is the lower diagonal entries of the gram matrix in
     // l_polytope(t)(i). l_polytope(t) will multiply with (d-C*t).
     std::vector<int> polytope_lagrangian_gram_lower_start;
     // lagrangian_gram_vars.segment(t_lower_lagrangian_gram_start_index[i],

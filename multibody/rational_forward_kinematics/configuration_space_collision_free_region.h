@@ -59,7 +59,7 @@ struct SeparationPlane {
 
 /** We need to verify that these polynomials are non-negative
  * Lagrangians l_lower(t) >= 0, l_upper(t) >= 0
- * Link polynomial p(t) - l_lower(t) * (t - t_lower) - l_upper(t)(t_upper_t)
+ * Link polynomial p(t) - l_lower(t) * (t - t_lower) - l_upper(t)(t_upper - t)
  * >= 0
  */
 struct VerificationOption {

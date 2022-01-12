@@ -363,7 +363,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
     const VectorX<symbolic::Polynomial>& d_minus_Ct,
     const VectorX<symbolic::Polynomial>& t_minus_t_lower,
     const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-    const VectorX<symbolic::Monomial>& monomial_basis,
+    const VectorX<symbolic::Monomial>& monomial_basis, //TODO: should we enforce that this basis be sufficient to express the polynomials in polytope_on_one_side_rational
     const VerificationOption& verification_option,
     const std::vector<bool>& t_lower_needs_lagrangian,
     const std::vector<bool>& t_upper_needs_lagrangian,
@@ -376,6 +376,8 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   lagrangian_upper->resize(t_upper_minus_t.rows());
   *verified_polynomial = polytope_on_one_side_rational.numerator();
   for (int i = 0; i < d_minus_Ct.rows(); ++i) {
+    // TODO: only include the lagranians from the non-redundant inequalities of the polytope. Check this condition in here or pass argument like for the lower and upper?
+    // Degree of polynomial might be higher than is needed here since we can drop all the coordinate degrees by one due to the multiplication with d-C^T t
     (*lagrangian_polytope)(i) =
         prog->NewNonnegativePolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
@@ -383,6 +385,8 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
     *verified_polynomial -= (*lagrangian_polytope)(i)*d_minus_Ct(i);
   }
   for (int i = 0; i < t_minus_t_lower.rows(); ++i) {
+    // TODO: Should we not still add the multiplier here and just set it to 0 if its not needed. Because when we adjust
+    // the regions in the bilinear alternation, it may become the case that t-t_lower>= 0 and t_upper-t <=0 becomes relevant again
     if (t_lower_needs_lagrangian[i]) {
       (*lagrangian_lower)(i) =
           prog->NewNonnegativePolynomial(monomial_basis,
@@ -417,6 +421,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
 }
 }  // namespace
 
+// TODO: how is this different from the ContructLagranianProblem method?
 CspaceFreeRegion::CspacePolytopeProgramReturn
 CspaceFreeRegion::ConstructProgramForCspacePolytope(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
@@ -927,10 +932,13 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
   VerificationOption verification_option{};
   while (iter_count < bilinear_alternation_option.max_iters &&
          cost_improvement > bilinear_alternation_option.convergence_tol) {
+    // TODO: Why do we have to reconstruct the problem at every iteration? Can't we just update it?
+    // TODO: For add option to only search for lagrangian in the relevant inequalities of the polytope
     auto prog_lagrangian = ConstructLagrangianProgram(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
         verified_gram_vars, separating_plane_vars, t_lower, t_upper,
         verification_option, &P, &q);
+    // TODO: Why is this not done in the ConstructLagrangianProgram function?
     auto [log_det_cost, log_det_t, log_det_Z] =
         prog_lagrangian->AddMaximizeLogDeterminantCost(
             P.cast<symbolic::Expression>());
@@ -967,6 +975,7 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     previous_cost = log_det_P;
 
     // Now solve the polytope problem (fix Lagrangian).
+    // TODO: Why do we reconstruct every iteration? Can't we simply update the program?
     auto prog_polytope = ConstructPolytopeProgram(
         alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
         verified_gram_vars, separating_plane_vars, t_minus_t_lower,
@@ -1011,6 +1020,10 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
     const BinarySearchOption& binary_search_option,
     const solvers::SolverOptions& solver_options,
     Eigen::VectorXd* d_final) const {
+  // TODO: This method tries to find the maximum expansion of the polytope. I tried to find the minimal tightening
+  // of the polytope. Could try both: If initial region C t <= d_init infeasible then look for d_init-var_epsilon
+  // and search until either empty/region is too small and verified. If initial reagion is feasible then try to grow
+  // d_init + var_epsilon
   const int C_rows = C.rows();
   DRAKE_DEMAND(d_init.rows() == C_rows);
   DRAKE_DEMAND(C.cols() == rational_forward_kinematics_.t().rows());
@@ -1076,6 +1089,9 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
       std::cout << fmt::format("epsilon={} is infeasible\n", eps);
       eps_max = eps;
     }
+    // TODO: we can do better than this. From a certificate of collision-free we can then maximize/minimize eps from the proof
+    // of collision freeness. This introduces a bilinear alternation which is why I said the problem is not quasi-convex
+    // this is much better than uniform expansions.
     *d_final = d;
   }
 }

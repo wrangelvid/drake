@@ -52,6 +52,12 @@ class HPolyhedron final : public ConvexSet {
   alternatives). */
   using ConvexSet::IsBounded;
 
+  /** Returns true iff this HPolyhedron is entirely contained in the HPolyhedron other. This is done by checking
+   * whether every inequality in @p other is redundant when added to this.
+   * @return
+   */
+  bool ContainedInOtherHPolyhedron(const HPolyhedron other) const;
+
   /** Solves a semi-definite program to compute the inscribed ellipsoid.
   From Section 8.4.2 in Boyd and Vandenberghe, 2004, we solve
   @verbatim
