@@ -231,6 +231,48 @@ void DefineGeometryOptimization(py::module m) {
                 self.relative_termination_threshold,
                 self.configuration_space_margin, self.enable_ibex);
       });
+  py::class_<IrisOptionsRationalSpace>(m, "IrisOptionsRationalSpace", doc.IrisOptionsRationalSpace.doc)
+      .def(py::init<>(), doc.IrisOptionsRationalSpace.ctor.doc)
+      .def_readwrite("require_sample_point_is_contained",
+          &IrisOptionsRationalSpace::require_sample_point_is_contained,
+          doc.IrisOptionsRationalSpace.require_sample_point_is_contained.doc)
+      .def_readwrite("iteration_limit", &IrisOptionsRationalSpace::iteration_limit,
+          doc.IrisOptionsRationalSpace.iteration_limit.doc)
+      .def_readwrite("termination_threshold",
+          &IrisOptionsRationalSpace::termination_threshold,
+          doc.IrisOptionsRationalSpace.termination_threshold.doc)
+      .def_readwrite("relative_termination_threshold",
+          &IrisOptionsRationalSpace::relative_termination_threshold,
+          doc.IrisOptionsRationalSpace.relative_termination_threshold.doc)
+      .def_readwrite("configuration_space_margin",
+          &IrisOptionsRationalSpace::configuration_space_margin,
+          doc.IrisOptionsRationalSpace.configuration_space_margin.doc)
+      .def_readwrite("enable_ibex", &IrisOptionsRationalSpace::enable_ibex,
+          doc.IrisOptionsRationalSpace.enable_ibex.doc)
+      .def_readwrite("certify_region_with_sos_during_generation", &IrisOptionsRationalSpace::certify_region_with_sos_during_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
+      .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
+      .def("__repr__", [](const IrisOptions& self) {
+        return py::str(
+            "IrisOptionsRationalSpace("
+            "require_sample_point_is_contained={}, "
+            "iteration_limit={}, "
+            "termination_threshold={}, "
+            "relative_termination_threshold={}, "
+            "configuration_space_margin={}, "
+            "enable_ibex={}"
+            "certify_region_with_sos_during_generation={}"
+            "certify_region_with_sos_after_generation={}"
+            ")")
+            .format(self.require_sample_point_is_contained,
+                self.iteration_limit, self.termination_threshold,
+                self.relative_termination_threshold,
+                self.configuration_space_margin, self.enable_ibex,
+                self.certify_region_with_sos_during_generation,
+                self.certify_region_with_sos_after_generation
+                );
+      });
 
   m.def("Iris", &Iris, py::arg("obstacles"), py::arg("sample"),
       py::arg("domain"), py::arg("options") = IrisOptions(), doc.Iris.doc);

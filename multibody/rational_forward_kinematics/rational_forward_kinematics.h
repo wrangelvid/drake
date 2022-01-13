@@ -12,6 +12,7 @@
 #include "drake/multibody/tree/space_xyz_mobilizer.h"
 #include "drake/multibody/tree/weld_mobilizer.h"
 
+
 namespace drake {
 namespace multibody {
 /**
@@ -135,11 +136,29 @@ class RationalForwardKinematics {
       bool clamp_angle = false) const;
 
   /**
+   * compute t = tan((q_val - q_star_val / 2)), while handling the index
+   * matching between q and t. If @p clamp_angle = true, then t = infinity if
+   * q_val >= q_star_val + pi, and t = -infinity if q_val <= q_star_val - pi.
+   */
+  VectorX<symbolic::Expression> ComputeTValue(
+      const Eigen::Ref<const VectorX<symbolic::Expression>>& q_val,
+      const Eigen::Ref<const Eigen::VectorXd>& q_star_val,
+      bool clamp_angle = false) const;
+
+  /**
    * compute q = arctan2(2*t/(1+t**2), (1-t**2)/(1+t**2)) + q_star, while handling the index
    * matching between q and t.
    */
   Eigen::VectorXd ComputeQValue(
       const Eigen::Ref<const Eigen::VectorXd>& t_val,
+      const Eigen::Ref<const Eigen::VectorXd>& q_star_val) const;
+
+  /**
+   * compute q = arctan2(2*t/(1+t**2), (1-t**2)/(1+t**2)) + q_star, while handling the index
+   * matching between q and t.
+   */
+  VectorX<symbolic::Expression> ComputeQValue(
+      const Eigen::Ref<const VectorX<symbolic::Expression>>& t_val,
       const Eigen::Ref<const Eigen::VectorXd>& q_star_val) const;
 
   // Return the indeterminates t on the path from start to the end.
