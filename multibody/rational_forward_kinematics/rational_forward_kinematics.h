@@ -134,6 +134,14 @@ class RationalForwardKinematics {
       const Eigen::Ref<const Eigen::VectorXd>& q_star_val,
       bool clamp_angle = false) const;
 
+  /**
+   * compute q = arctan2(2*t/(1+t**2), (1-t**2)/(1+t**2)) + q_star, while handling the index
+   * matching between q and t.
+   */
+  Eigen::VectorXd ComputeQValue(
+      const Eigen::Ref<const Eigen::VectorXd>& t_val,
+      const Eigen::Ref<const Eigen::VectorXd>& q_star_val) const;
+
   // Return the indeterminates t on the path from start to the end.
   drake::VectorX<drake::symbolic::Variable> FindTOnPath(
       drake::multibody::BodyIndex start, drake::multibody::BodyIndex end) const;

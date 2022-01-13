@@ -74,6 +74,10 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
             py::arg("q_star_val"), py::arg("clamp_angle") = false
             //             cls_doc.CalcLinkPoses
             )
+        .def("ComputeQValue", &Class::ComputeQValue, py::arg("t_val"),
+            py::arg("q_star_val")
+            //             cls_doc.CalcLinkPoses
+            )
         .def(
             "FindTOnPath", &Class::FindTOnPath, py::arg("start"), py::arg("end")
             //             cls_doc.CalcLinkPoses

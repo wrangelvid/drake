@@ -308,6 +308,7 @@ class SamePointConstraint : public solvers::Constraint {
     *y = p_WA - p_WB;
   }
 
+ protected:
   const MultibodyPlant<double>* const plant_;
   const multibody::Frame<double>* frameA_{nullptr};
   const multibody::Frame<double>* frameB_{nullptr};
@@ -318,34 +319,44 @@ class SamePointConstraint : public solvers::Constraint {
 };
 
 // takes t, p_AA, and p_BB and enforces that p_WA == p_WB
-class SamePointConstraintRational : public SamePointConstraint{
-  public:
-    DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SamePointConstraintRational)
-
-    SamePointConstraintRational(
-        const multibody::RationalForwardKinematics& rational_forward_kinematics,
-        const Context<double>& context)
-        : SamePointConstraint(&rational_forward_kinematics.plant(), context){
-
-    }
-//        solvers::Constraint(
-//              3,
-//              rational_forward_kinematics.plant()
-//                  ? rational_forward_kinematics.plant().num_positions() + 6
-//                  : 0,
-//              Vector3d::Zero(), Vector3d::Zero()),
-//              plant_(*rational_forward_kinematics.plant()){}
-
-
-
-  const MultibodyPlant<double>* const plant_;
-  const multibody::Frame<double>* frameA_{nullptr};
-  const multibody::Frame<double>* frameB_{nullptr};
-  std::unique_ptr<Context<double>> context_;
-
-  std::unique_ptr<MultibodyPlant<Expression>> symbolic_plant_{nullptr};
-  std::unique_ptr<Context<Expression>> symbolic_context_{nullptr};
-};
+//class SamePointConstraintRational : public SamePointConstraint{
+//  public:
+//    DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SamePointConstraintRational)
+//
+//    SamePointConstraintRational(
+//        const multibody::RationalForwardKinematics* rational_forward_kinematics_ptr,
+//        const Eigen::Ref<const Eigen::VectorXd>& q_star,
+//        const Context<double>& context)
+//        : SamePointConstraint(&rational_forward_kinematics_ptr->plant(), context),
+//        rational_forward_kinematics_ptr_(rational_forward_kinematics_ptr),
+//        q_star_(q_star)
+//        {}
+//
+//    ~SamePointConstraintRational() override {}
+//
+// private:
+//  void DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
+//              Eigen::VectorXd* y) const override {
+//    DRAKE_DEMAND(frameA_ != nullptr);
+//    DRAKE_DEMAND(frameB_ != nullptr);
+//    VectorXd t = x.head(plant_->num_positions());
+//    VectorXd q = rational_forward_kinematics_ptr_->ComputeTValue();
+//    Vector3d p_AA = x.template segment<3>(plant_->num_positions()),
+//             p_BB = x.template tail<3>();
+//    Vector3d p_WA, p_WB;
+//    plant_->SetPositions(context_.get(), q);
+//    plant_->CalcPointsPositions(*context_, *frameA_, p_AA,
+//                                plant_->world_frame(), &p_WA);
+//    plant_->CalcPointsPositions(*context_, *frameB_, p_BB,
+//                                plant_->world_frame(), &p_WB);
+//    *y = p_WA - p_WB;
+//  }
+//
+// protected:
+//  const multibody::RationalForwardKinematics* rational_forward_kinematics_ptr_;
+//  const Eigen::VectorXd q_star_;
+//
+//};
 
 
 // Solves the optimization
@@ -616,57 +627,57 @@ HPolyhedron IrisInConfigurationSpace(const MultibodyPlant<double>& plant,
 }
 
 
-HPolyhedron IrisInConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const Eigen::Ref<const Eigen::VectorXd>& q_star,
-    const HPolyhedron starting_hpolyhedron,
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace()) {
-
-  // Check the inputs.
-  plant.ValidateContext(context);
-  const int nt = plant.num_positions();
-  const multibody::RationalForwardKinematics rational_forward_kinematics(plant);
-
-  const Eigen::VectorXd sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
-  const Eigen::VectorXd t_lower_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionLowerLimits(), q_star);
-  const Eigen::VectorXd t_upper_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionUpperLimits(), q_star);
-
-  HPolyhedron P_joint_limits = HPolyhedron(t_lower_limits, t_upper_limits);
-  DRAKE_DEMAND(P_joint_limits.A().rows() == 2 * nt);
-  DRAKE_DEMAND(starting_hpolyhedron.ContainedInOtherHPolyhedron(P_joint_limits));
-
-  const double kEpsilonEllipsoid = 1e-2;
-  Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
-
-  // Make all of the convex sets and supporting quantities.
-  // TODO(amice): should we provide a way that we don't have to run this for every sample point?
-  auto query_object =
-      plant.get_geometry_query_input_port().Eval<QueryObject<double>>(context);
-  const SceneGraphInspector<double>& inspector = query_object.inspector();
-  IrisConvexSetMaker maker(query_object, inspector.world_frame_id());
-  std::unordered_map<GeometryId, copyable_unique_ptr<ConvexSet>> sets{};
-  std::unordered_map<GeometryId, const multibody::Frame<double>*> frames{};
-  const std::unordered_set<GeometryId> geom_ids = inspector.GetGeometryIds(
-      GeometrySet(inspector.GetAllGeometryIds()), Role::kProximity);
-  copyable_unique_ptr<ConvexSet> temp_set;
-  for (GeometryId geom_id : geom_ids) {
-    // Make all sets in the local geometry frame.
-    FrameId frame_id = inspector.GetFrameId(geom_id);
-    maker.set_reference_frame(frame_id);
-    maker.set_geometry_id(geom_id);
-    inspector.GetShape(geom_id).Reify(&maker, &temp_set);
-    sets.emplace(geom_id, std::move(temp_set));
-    frames.emplace(geom_id, &plant.GetBodyFromFrameId(frame_id)->body_frame());
-  }
-
-  auto pairs = inspector.GetCollisionCandidates();
-  const int N = static_cast<int>(pairs.size());
-  auto same_point_constraint =
-      std::make_shared<SamePointConstraint>(&plant, context);
-
-
-}
+//HPolyhedron IrisInConfigurationSpace(
+//    const multibody::MultibodyPlant<double>& plant,
+//    const systems::Context<double>& context,
+//    const Eigen::Ref<const Eigen::VectorXd>& q_star,
+//    const HPolyhedron starting_hpolyhedron,
+//    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace()) {
+//
+//  // Check the inputs.
+//  plant.ValidateContext(context);
+//  const int nt = plant.num_positions();
+//  const multibody::RationalForwardKinematics rational_forward_kinematics(plant);
+//
+//  const Eigen::VectorXd sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
+//  const Eigen::VectorXd t_lower_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionLowerLimits(), q_star);
+//  const Eigen::VectorXd t_upper_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionUpperLimits(), q_star);
+//
+//  HPolyhedron P_joint_limits = HPolyhedron(t_lower_limits, t_upper_limits);
+//  DRAKE_DEMAND(P_joint_limits.A().rows() == 2 * nt);
+//  DRAKE_DEMAND(starting_hpolyhedron.ContainedInOtherHPolyhedron(P_joint_limits));
+//
+//  const double kEpsilonEllipsoid = 1e-2;
+//  Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
+//
+//  // Make all of the convex sets and supporting quantities.
+//  // TODO(amice): should we provide a way that we don't have to run this for every sample point?
+//  auto query_object =
+//      plant.get_geometry_query_input_port().Eval<QueryObject<double>>(context);
+//  const SceneGraphInspector<double>& inspector = query_object.inspector();
+//  IrisConvexSetMaker maker(query_object, inspector.world_frame_id());
+//  std::unordered_map<GeometryId, copyable_unique_ptr<ConvexSet>> sets{};
+//  std::unordered_map<GeometryId, const multibody::Frame<double>*> frames{};
+//  const std::unordered_set<GeometryId> geom_ids = inspector.GetGeometryIds(
+//      GeometrySet(inspector.GetAllGeometryIds()), Role::kProximity);
+//  copyable_unique_ptr<ConvexSet> temp_set;
+//  for (GeometryId geom_id : geom_ids) {
+//    // Make all sets in the local geometry frame.
+//    FrameId frame_id = inspector.GetFrameId(geom_id);
+//    maker.set_reference_frame(frame_id);
+//    maker.set_geometry_id(geom_id);
+//    inspector.GetShape(geom_id).Reify(&maker, &temp_set);
+//    sets.emplace(geom_id, std::move(temp_set));
+//    frames.emplace(geom_id, &plant.GetBodyFromFrameId(frame_id)->body_frame());
+//  }
+//
+//  auto pairs = inspector.GetCollisionCandidates();
+//  const int N = static_cast<int>(pairs.size());
+//  auto same_point_constraint =
+//      std::make_shared<SamePointConstraint>(&plant, context);
+//
+////  return HPolyhedron(Eigen::MatrixBase::setIdentity(1,1), Eigen::MatrixBase::)
+//}
 
 
 }  // namespace optimization
