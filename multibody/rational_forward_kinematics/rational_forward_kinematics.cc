@@ -575,6 +575,26 @@ VectorX<symbolic::Expression> RationalForwardKinematics::ComputeQValue(
   return q_val;
 }
 
+VectorX<AutoDiffXd> RationalForwardKinematics::ComputeQValue(
+    const Eigen::Ref<const VectorX<AutoDiffXd>>& t_val,
+    const Eigen::Ref<const Eigen::VectorXd>& q_star_val) const {
+  VectorX<AutoDiffXd> q_val(t_.size());
+  for (int i = 0; i < t_val.size(); ++i) {
+    const Mobilizer<double>& mobilizer = GetInternalTree(plant_).get_mobilizer(
+        map_t_to_mobilizer_.at(t_(i).get_id()));
+    if (dynamic_cast<const RevoluteMobilizer<double>*>(&mobilizer) != nullptr) {
+      const int q_index = mobilizer.position_start_in_q();
+      q_val(q_index) = atan2(2 * t_val(i) / (1 + pow(t_val(i), 2)),
+                                  (1 - pow(t_val(i), 2)) /
+                                           (1 + pow(t_val(i), 2))) +
+                       q_star_val(q_index);
+    } else {
+      throw std::runtime_error("Other joint types are not supported yet.");
+    }
+  }
+  return q_val;
+}
+
 VectorX<drake::symbolic::Variable> RationalForwardKinematics::FindTOnPath(
     BodyIndex start, BodyIndex end) const {
   const std::vector<MobilizerIndex> mobilizers =

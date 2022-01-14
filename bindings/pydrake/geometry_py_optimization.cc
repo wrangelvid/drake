@@ -253,6 +253,10 @@ void DefineGeometryOptimization(py::module m) {
           doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
       .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
           doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
+      .def("get_q_star", &IrisOptionsRationalSpace::get_q_star)
+      .def("set_q_star", &IrisOptionsRationalSpace::set_q_star, py::arg("q_star"))
+      .def("get_starting_hpolyhedron", &IrisOptionsRationalSpace::get_starting_hpolyhedron)
+      .def("set_starting_hpolyhedron", &IrisOptionsRationalSpace::set_starting_hpolyhedron, py::arg("starting_hpolyhedron"))
       .def("__repr__", [](const IrisOptionsRationalSpace& self) {
         return py::str(
             "IrisOptionsRationalSpace("

@@ -94,6 +94,7 @@ HPolyhedron Iris(const ConvexSets& obstacles,
                  const HPolyhedron& domain,
                  const IrisOptions& options = IrisOptions());
 
+
 /** Constructs ConvexSet representations of obstacles for IRIS in 3D using the
 geometry from a SceneGraph QueryObject. All geometry in the scene with a
 proximity role, both anchored and dynamic, are consider to be *fixed* obstacles
@@ -175,7 +176,25 @@ struct IrisOptionsRationalSpace : public IrisOptions {
    * */
   HPolyhedron* starting_hpolyhedron_ptr = nullptr;
 
+  void set_q_star(const Eigen::Ref<const Eigen::VectorXd>& q_star)
+  {
+    Eigen::VectorXd q_star_copy = q_star;
+    q_star_ptr = &q_star_copy;
+  }
+  Eigen::VectorXd get_q_star()
+  {
+    return *q_star_ptr;
+  }
 
+  void set_starting_hpolyhedron(const HPolyhedron P)
+  {
+    HPolyhedron P_copy = P;
+    starting_hpolyhedron_ptr = &P_copy;
+  }
+  HPolyhedron get_starting_hpolyhedron()
+  {
+    return *starting_hpolyhedron_ptr;
+  }
 
 };
 

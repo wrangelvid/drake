@@ -120,6 +120,9 @@ HPolyhedron Iris(const ConvexSets& obstacles, const Ref<const VectorXd>& sample,
   return P;
 }
 
+
+
+
 namespace {
 // Constructs a ConvexSet for each supported Shape and adds it to the set.
 class IrisConvexSetMaker final : public ShapeReifier {
@@ -278,6 +281,7 @@ class SamePointConstraint : public solvers::Constraint {
         *context_, JacobianWrtVariable::kQDot, *frameB_,
         ExtractDoubleOrThrow(p_BB), plant_->world_frame(),
         plant_->world_frame(), &Jq_v_WB);
+
     *y = X_WA.cast<AutoDiffXd>() * p_AA - X_WB.cast<AutoDiffXd>() * p_BB;
     // Now add it the dydq terms.  We don't use the standard autodiff tools
     // because these only impact a subset of the autodiff derivatives.
@@ -355,15 +359,19 @@ class SamePointConstraintRational : public SamePointConstraint{
 
   void DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
               AutoDiffVecXd* y) const override {
+
     DRAKE_DEMAND(frameA_ != nullptr);
     DRAKE_DEMAND(frameB_ != nullptr);
     VectorX<AutoDiffXd> t = x.head(plant_->num_positions());
-    VectorX<AutoDiffXd> q = rational_forward_kinematics_ptr_->ComputeQValue(ExtractDoubleOrThrow(t), q_star_);
+    VectorX<AutoDiffXd> q = rational_forward_kinematics_ptr_->ComputeQValue(t, q_star_);
+
+
     Vector3<AutoDiffXd> p_AA = x.template segment<3>(plant_->num_positions()),
                         p_BB = x.template tail<3>();
     plant_->SetPositions(context_.get(), ExtractDoubleOrThrow(q));
     const RigidTransform<double>& X_WA =
         plant_->EvalBodyPoseInWorld(*context_, frameA_->body());
+    std::cout << X_WA << std::endl;
     const RigidTransform<double>& X_WB =
         plant_->EvalBodyPoseInWorld(*context_, frameB_->body());
     Eigen::Matrix3Xd Jq_v_WA(3, plant_->num_positions()),
@@ -376,12 +384,20 @@ class SamePointConstraintRational : public SamePointConstraint{
         *context_, JacobianWrtVariable::kQDot, *frameB_,
         ExtractDoubleOrThrow(p_BB), plant_->world_frame(),
         plant_->world_frame(), &Jq_v_WB);
+    Eigen::Matrix3Xd Jt_v_WA(3, plant_->num_positions()),
+        Jt_v_WB(3, plant_->num_positions());
+    for (int i = 0; i < plant_->num_positions(); i++){
+      Jt_v_WA.row(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
+      Jt_v_WB.row(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
+    }
+
+
     *y = X_WA.cast<AutoDiffXd>() * p_AA - X_WB.cast<AutoDiffXd>() * p_BB;
     // Now add it the dydq terms.  We don't use the standard autodiff tools
     // because these only impact a subset of the autodiff derivatives.
     for (int i = 0; i < 3; i++) {
       (*y)[i].derivatives().head(plant_->num_positions()) +=
-          (Jq_v_WA.row(i) - Jq_v_WB.row(i)).transpose();
+          (Jt_v_WA.row(i) - Jt_v_WB.row(i)).transpose();
     }
   }
 
@@ -719,6 +735,7 @@ HPolyhedron IrisInRationalConfigurationSpace(
 
   const double kEpsilonEllipsoid = 1e-2;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
+  std::cout << E.Volume() << std::endl;
 
   // Make all of the convex sets and supporting quantities.
   // TODO(amice): should we provide a way that we don't have to run this for every sample point?
@@ -790,17 +807,26 @@ HPolyhedron IrisInRationalConfigurationSpace(
     int num_constraints = 2 * nt;  // Start with just the joint limits.
     bool sample_point_requirement = true;
     DRAKE_ASSERT(best_volume > 0);
+    std::cout << "STARTING IRIS" << std::endl;
     // Find separating hyperplanes
 
     // First use a fast nonlinear optimizer to add as many constraint as it
     // can find.
     for (const auto& pair : sorted_pairs) {
+      std::cout << sample_point_requirement << std::endl;
+      bool closest_collision = FindClosestCollision(
+                 same_point_constraint, *frames.at(pair.geomA),
+                 *frames.at(pair.geomB), *sets.at(pair.geomA),
+                 *sets.at(pair.geomB), E, A.topRows(num_constraints),
+                 b.head(num_constraints), *solver, sample, &closest);
+      std::cout << closest_collision << std::endl << std::endl;
       while (sample_point_requirement &&
              FindClosestCollision(
                  same_point_constraint, *frames.at(pair.geomA),
                  *frames.at(pair.geomB), *sets.at(pair.geomA),
                  *sets.at(pair.geomB), E, A.topRows(num_constraints),
                  b.head(num_constraints), *solver, sample, &closest)) {
+        std::cout << "RUNNING SNOPT" << std::endl;
         AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
         if (options.require_sample_point_is_contained) {
           sample_point_requirement =
@@ -858,6 +884,11 @@ HPolyhedron IrisInRationalConfigurationSpace(
   if (options.certify_region_with_sos_after_generation){
     //TODO (amice): put the certification code in here
   }
+  const Vector2<symbolic::Expression> xy{symbolic::Variable("x"),
+                                         symbolic::Variable("y")};
+  HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+  std::cout << (P.A()*xy <= P.b()) << std::endl;
+  std::cout << (P_joint_limits.A()*xy <= P_joint_limits.b()) << std::endl << std::endl;
   return P;
 }
 
