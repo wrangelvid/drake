@@ -152,20 +152,30 @@ struct IrisOptionsRationalSpace : public IrisOptions {
   IrisOptionsRationalSpace() = default;
 
 
-  /** For IRIS in configuration space, we can certify that the regions are truly
+  /** For IRIS in rational configuration space, we can certify that the regions are truly
    * collision free using SOS programming at the methods in
    * multibody/rational_forward_kinematics. Whether to do the certification
    * steps in the loop or not is an option*/
   bool certify_region_with_sos_during_generation = false;
 
-  /** For IRIS in configuration space, we can certify that the regions are truly
+  /** For IRIS in rational configuration space, we can certify that the regions are truly
    * collision free using SOS programming at the methods in
    * multibody/rational_forward_kinematics. We can do the certification
    * adjustments at one time at the end
-   * TODO: enforce that only one of certify_region_during_generation and certify_region_after_generation is true
-   * TODO: enforce that one of certify with ibex and certify with sos true
+   * TODO (amice): enforce that only one of certify_region_during_generation and certify_region_after_generation is true
+   * TODO (amice): enforce that one of certify with ibex and certify with sos true
+   * TODO (amice): set default true once we have the integration
    * */
-  bool certify_region_with_sos_after_generation = true;
+  bool certify_region_with_sos_after_generation = false;
+
+  /** For IRIS in rational configuration space we need a point around which to perform the stereographic projection
+   * */
+  Eigen::VectorXd* q_star_ptr = nullptr;
+  /** The initial constrain polyhedron of IRIS
+   * */
+  HPolyhedron* starting_hpolyhedron_ptr = nullptr;
+
+
 
 };
 
@@ -191,18 +201,8 @@ of the plant set to the initialIRIS seed configuration.
 HPolyhedron IrisInRationalConfigurationSpace(
     const multibody::MultibodyPlant<double>& plant,
     const systems::Context<double>& context,
-    const Eigen::Ref<const Eigen::VectorXd>&
-        q_star,  // TODO should this be in options?
-    const HPolyhedron starting_hpolyhedron,
     const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
 
-// Same method but start the polyhedron guess at the joint limits.
-HPolyhedron IrisInRationalConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const Eigen::Ref<const Eigen::VectorXd>&
-        q_star,  // TODO should this be in options?
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
 
 }  // namespace optimization
 }  // namespace geometry

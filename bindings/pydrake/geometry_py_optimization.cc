@@ -235,25 +235,25 @@ void DefineGeometryOptimization(py::module m) {
       .def(py::init<>(), doc.IrisOptionsRationalSpace.ctor.doc)
       .def_readwrite("require_sample_point_is_contained",
           &IrisOptionsRationalSpace::require_sample_point_is_contained,
-          doc.IrisOptionsRationalSpace.require_sample_point_is_contained.doc)
+          doc.IrisOptions.require_sample_point_is_contained.doc)
       .def_readwrite("iteration_limit", &IrisOptionsRationalSpace::iteration_limit,
-          doc.IrisOptionsRationalSpace.iteration_limit.doc)
+          doc.IrisOptions.iteration_limit.doc)
       .def_readwrite("termination_threshold",
           &IrisOptionsRationalSpace::termination_threshold,
-          doc.IrisOptionsRationalSpace.termination_threshold.doc)
+          doc.IrisOptions.termination_threshold.doc)
       .def_readwrite("relative_termination_threshold",
           &IrisOptionsRationalSpace::relative_termination_threshold,
-          doc.IrisOptionsRationalSpace.relative_termination_threshold.doc)
+          doc.IrisOptions.relative_termination_threshold.doc)
       .def_readwrite("configuration_space_margin",
           &IrisOptionsRationalSpace::configuration_space_margin,
-          doc.IrisOptionsRationalSpace.configuration_space_margin.doc)
+          doc.IrisOptions.configuration_space_margin.doc)
       .def_readwrite("enable_ibex", &IrisOptionsRationalSpace::enable_ibex,
-          doc.IrisOptionsRationalSpace.enable_ibex.doc)
+          doc.IrisOptions.enable_ibex.doc)
       .def_readwrite("certify_region_with_sos_during_generation", &IrisOptionsRationalSpace::certify_region_with_sos_during_generation,
           doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
       .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
           doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
-      .def("__repr__", [](const IrisOptions& self) {
+      .def("__repr__", [](const IrisOptionsRationalSpace& self) {
         return py::str(
             "IrisOptionsRationalSpace("
             "require_sample_point_is_contained={}, "
@@ -279,6 +279,11 @@ void DefineGeometryOptimization(py::module m) {
 
   m.def("MakeIrisObstacles", &MakeIrisObstacles, py::arg("query_object"),
       py::arg("reference_frame") = std::nullopt, doc.MakeIrisObstacles.doc);
+
+  m.def("IrisInRationalConfigurationSpace", &IrisInRationalConfigurationSpace,
+      py::arg("plant"), py::arg("context"),
+      py::arg("options") = IrisOptionsRationalSpace(),
+      doc.IrisInRationalConfigurationSpace.doc);
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,

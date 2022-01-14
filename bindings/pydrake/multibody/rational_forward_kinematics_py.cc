@@ -70,14 +70,46 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
         .def("t", &Class::t
             //             cls_doc.CalcLinkPoses
             )
-        .def("ComputeTValue", &Class::ComputeTValue, py::arg("q_val"),
+        .def("ComputeTValue",
+             overload_cast_explicit<
+                 Eigen::VectorXd,
+                 const Eigen::Ref<const Eigen::VectorXd>&,
+                 const Eigen::Ref<const Eigen::VectorXd>&,
+                 bool>(
+          &Class::ComputeTValue), py::arg("q_val"),
             py::arg("q_star_val"), py::arg("clamp_angle") = false
             //             cls_doc.CalcLinkPoses
             )
-        .def("ComputeQValue", &Class::ComputeQValue, py::arg("t_val"),
+          // TODO (amice): figure out how to bind the symbolic version of this function
+//        .def("ComputeTValue",
+//             overload_cast_explicit<
+//                 drake::VectorX<symbolic::Expression>,
+//                 const Eigen::Ref<const drake::VectorX<symbolic::Expression>>&,
+//                 const Eigen::Ref<const Eigen::MatrixXd>&,
+//                 bool>(
+//          &Class::ComputeTValue), py::arg("q_val"),
+//            py::arg("q_star_val"), py::arg("clamp_angle") = false
+//            //             cls_doc.CalcLinkPoses
+//            )
+        .def("ComputeQValue",
+             overload_cast_explicit<
+                 Eigen::VectorXd,
+                 const Eigen::Ref<const Eigen::VectorXd>&,
+                 const Eigen::Ref<const Eigen::VectorXd>&>
+          (&Class::ComputeQValue), py::arg("t_val"),
             py::arg("q_star_val")
             //             cls_doc.CalcLinkPoses
             )
+            // TODO (amice): figure out how to bind the symbolic version of this function
+//        .def("ComputeQValue",
+//             overload_cast_explicit<
+//                 drake::VectorX<symbolic::Expression>,
+//                 const Eigen::Ref<const Eigen::VectorXd>&,
+//                 const Eigen::Ref<const Eigen::VectorXd>&>
+//          (&Class::ComputeQValue), py::arg("t_val"),
+//            py::arg("q_star_val")
+//            //             cls_doc.CalcLinkPoses
+//            )
         .def(
             "FindTOnPath", &Class::FindTOnPath, py::arg("start"), py::arg("end")
             //             cls_doc.CalcLinkPoses

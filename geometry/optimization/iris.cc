@@ -682,26 +682,40 @@ HPolyhedron IrisInConfigurationSpace(const MultibodyPlant<double>& plant,
 }
 
 
-HPolyhedron IrisInConfigurationSpace(
+HPolyhedron IrisInRationalConfigurationSpace(
     const multibody::MultibodyPlant<double>& plant,
     const systems::Context<double>& context,
-    const Eigen::Ref<const Eigen::VectorXd>& q_star,
-    const HPolyhedron starting_hpolyhedron,
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace()) {
+    const IrisOptionsRationalSpace& options) {
 
   // Check the inputs.
   plant.ValidateContext(context);
   const int nt = plant.num_positions();
   const multibody::RationalForwardKinematics rational_forward_kinematics(plant);
 
+  Eigen::VectorXd q_star;
+  if (options.q_star_ptr == nullptr){
+    q_star.setZero(nt);
+  }
+  else{
+    q_star = *options.q_star_ptr;
+  }
+  DRAKE_DEMAND(q_star.rows() == nt);
+
   const Eigen::VectorXd sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
   const Eigen::VectorXd t_lower_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionLowerLimits(), q_star);
   const Eigen::VectorXd t_upper_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionUpperLimits(), q_star);
 
-  HPolyhedron P_joint_limits = HPolyhedron(t_lower_limits, t_upper_limits);
-  HPolyhedron P = HPolyhedron(starting_hpolyhedron.A(), starting_hpolyhedron.b());
-  DRAKE_DEMAND(P_joint_limits.A().rows() == 2 * nt);
-  DRAKE_DEMAND(starting_hpolyhedron.ContainedInOtherHPolyhedron(P_joint_limits));
+  HPolyhedron P(Eigen::Matrix2d::Identity(), Eigen::Vector2d::Zero());
+  if(options.starting_hpolyhedron_ptr == nullptr) {
+    P = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+  }
+  else{
+    HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+    P = HPolyhedron((*options.starting_hpolyhedron_ptr).A(), (*options.starting_hpolyhedron_ptr).b());
+    // ensure that our starting HPolyhedron starts within the joint limits
+    DRAKE_DEMAND(P.ContainedInOtherHPolyhedron(P_joint_limits));
+  }
+  DRAKE_DEMAND(P.A().rows() >= 2 * nt);
 
   const double kEpsilonEllipsoid = 1e-2;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
