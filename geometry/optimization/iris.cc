@@ -371,7 +371,6 @@ class SamePointConstraintRational : public SamePointConstraint{
     plant_->SetPositions(context_.get(), ExtractDoubleOrThrow(q));
     const RigidTransform<double>& X_WA =
         plant_->EvalBodyPoseInWorld(*context_, frameA_->body());
-    std::cout << X_WA << std::endl;
     const RigidTransform<double>& X_WB =
         plant_->EvalBodyPoseInWorld(*context_, frameB_->body());
     Eigen::Matrix3Xd Jq_v_WA(3, plant_->num_positions()),
@@ -387,6 +386,7 @@ class SamePointConstraintRational : public SamePointConstraint{
     Eigen::Matrix3Xd Jt_v_WA(3, plant_->num_positions()),
         Jt_v_WB(3, plant_->num_positions());
     for (int i = 0; i < plant_->num_positions(); i++){
+      // dX_t_wa = dJ_q_WA * dq_dt
       Jt_v_WA.row(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
       Jt_v_WB.row(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
     }
@@ -735,7 +735,6 @@ HPolyhedron IrisInRationalConfigurationSpace(
 
   const double kEpsilonEllipsoid = 1e-2;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
-  std::cout << E.Volume() << std::endl;
 
   // Make all of the convex sets and supporting quantities.
   // TODO(amice): should we provide a way that we don't have to run this for every sample point?
@@ -807,26 +806,17 @@ HPolyhedron IrisInRationalConfigurationSpace(
     int num_constraints = 2 * nt;  // Start with just the joint limits.
     bool sample_point_requirement = true;
     DRAKE_ASSERT(best_volume > 0);
-    std::cout << "STARTING IRIS" << std::endl;
     // Find separating hyperplanes
 
     // First use a fast nonlinear optimizer to add as many constraint as it
     // can find.
     for (const auto& pair : sorted_pairs) {
-      std::cout << sample_point_requirement << std::endl;
-      bool closest_collision = FindClosestCollision(
-                 same_point_constraint, *frames.at(pair.geomA),
-                 *frames.at(pair.geomB), *sets.at(pair.geomA),
-                 *sets.at(pair.geomB), E, A.topRows(num_constraints),
-                 b.head(num_constraints), *solver, sample, &closest);
-      std::cout << closest_collision << std::endl << std::endl;
       while (sample_point_requirement &&
              FindClosestCollision(
                  same_point_constraint, *frames.at(pair.geomA),
                  *frames.at(pair.geomB), *sets.at(pair.geomA),
                  *sets.at(pair.geomB), E, A.topRows(num_constraints),
                  b.head(num_constraints), *solver, sample, &closest)) {
-        std::cout << "RUNNING SNOPT" << std::endl;
         AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
         if (options.require_sample_point_is_contained) {
           sample_point_requirement =
