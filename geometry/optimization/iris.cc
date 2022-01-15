@@ -387,8 +387,8 @@ class SamePointConstraintRational : public SamePointConstraint{
         Jt_v_WB(3, plant_->num_positions());
     for (int i = 0; i < plant_->num_positions(); i++){
       // dX_t_wa = dJ_q_WA * dq_dt
-      Jt_v_WA.row(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
-      Jt_v_WB.row(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
+      Jt_v_WA.col(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
+      Jt_v_WB.col(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
     }
 
 
@@ -733,7 +733,7 @@ HPolyhedron IrisInRationalConfigurationSpace(
   }
   DRAKE_DEMAND(P.A().rows() >= 2 * nt);
 
-  const double kEpsilonEllipsoid = 1e-2;
+  const double kEpsilonEllipsoid = 1e-5;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
 
   // Make all of the convex sets and supporting quantities.
@@ -877,8 +877,6 @@ HPolyhedron IrisInRationalConfigurationSpace(
   const Vector2<symbolic::Expression> xy{symbolic::Variable("x"),
                                          symbolic::Variable("y")};
   HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
-  std::cout << (P.A()*xy <= P.b()) << std::endl;
-  std::cout << (P_joint_limits.A()*xy <= P_joint_limits.b()) << std::endl << std::endl;
   return P;
 }
 
