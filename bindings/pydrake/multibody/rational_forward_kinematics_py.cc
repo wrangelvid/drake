@@ -208,7 +208,10 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
               .doc)
       .def_readwrite("verbose",
           &CspaceFreeRegion::BilinearAlternationOption::verbose,
-          doc.CspaceFreeRegion.BilinearAlternationOption.verbose.doc);
+          doc.CspaceFreeRegion.BilinearAlternationOption.verbose.doc)
+      .def_readwrite("redundant_tighten",
+          &CspaceFreeRegion::BilinearAlternationOption::redundant_tighten,
+          doc.CspaceFreeRegion.BilinearAlternationOption.redundant_tighten.doc);
 
   // BinarySearchOption
   py::class_<CspaceFreeRegion::BinarySearchOption>(
@@ -318,17 +321,18 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
               const VectorX<symbolic::Variable>& separating_plane_vars,
               const Eigen::Ref<const Eigen::VectorXd>& t_lower,
               const Eigen::Ref<const Eigen::VectorXd>& t_upper,
-              const VerificationOption& option) {
+              const VerificationOption& option,
+              std::optional<double> redundant_tighten) {
             auto prog = self->ConstructLagrangianProgram(alternation_tuples, C,
                 d, lagrangian_gram_vars, verified_gram_vars,
-                separating_plane_vars, t_lower, t_upper, option, nullptr,
-                nullptr);
+                separating_plane_vars, t_lower, t_upper, option,
+                redundant_tighten, nullptr, nullptr);
             return prog;
           },
           py::arg("alternation_tuples"), py::arg("C"), py::arg("d"),
           py::arg("lagrangian_gram_vars"), py::arg("verified_gram_vars"),
           py::arg("separating_plane_vars"), py::arg("t_lower"),
-          py::arg("t_upper"), py::arg("option"),
+          py::arg("t_upper"), py::arg("option"), py::arg("redundant_tighten"),
           doc.CspaceFreeRegion.ConstructLagrangianProgram.doc)
       .def(
           "ConstructPolytopeProgram",

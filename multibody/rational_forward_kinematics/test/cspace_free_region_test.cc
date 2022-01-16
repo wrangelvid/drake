@@ -647,9 +647,10 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
   MatrixX<symbolic::Variable> P;
   VectorX<symbolic::Variable> q;
   auto clock_start = std::chrono::system_clock::now();
+  double redundant_tighten = 0;
   auto prog = dut.ConstructLagrangianProgram(
       alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-      separating_plane_vars, t_lower, t_upper, {}, &P, &q);
+      separating_plane_vars, t_lower, t_upper, {}, redundant_tighten, &P, &q);
   auto clock_finish = std::chrono::system_clock::now();
   std::cout << "ConstructLagrangianProgram takes "
             << static_cast<float>(
@@ -819,8 +820,9 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
   const auto margin_sol = result_polytope.GetSolution(margin);
   EXPECT_TRUE((margin_sol.array() >= -1E-6).all());
   for (int i = 0; i < C.rows(); ++i) {
-    EXPECT_LE((C.row(i) * P_sol).norm() + C.row(i).dot(q_sol) + margin_sol(i),
-              d_sol(i) + 1E-6);
+    EXPECT_LE(
+        (C_sol.row(i) * P_sol).norm() + C_sol.row(i).dot(q_sol) + margin_sol(i),
+        d_sol(i) + 1E-6);
   }
 }
 
@@ -854,7 +856,6 @@ TEST_F(IiwaCspaceTest, CspacePolytopeBilinearAlternation) {
                                    .lagrangian_backoff_scale = 0.05,
                                    .polytope_backoff_scale = 0.05,
                                    .verbose = true};
-  // TODO: what should the above backoff scales actually be?
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, true);
   dut.CspacePolytopeBilinearAlternation(
@@ -1168,5 +1169,47 @@ GTEST_TEST(GetConvexPolytopes, Test) {
   }
 }
 
+GTEST_TEST(FindRedundantInequalities, Test) {
+  Eigen::Matrix<double, 4, 2> C;
+  C << 1, 1, -1, 1, 1, -1, -1, -1;
+  Eigen::Vector4d d(2, 2, 2, 2);
+  Eigen::Vector2d t_lower(-2.5, -2.5);
+  Eigen::Vector2d t_upper(2.5, 2.5);
+  std::unordered_set<int> C_redundant_indices, t_lower_redundant_indices,
+      t_upper_redundant_indices;
+  double tighten = 0;
+  FindRedundantInequalities(C, d, t_lower, t_upper, tighten,
+                            &C_redundant_indices, &t_lower_redundant_indices,
+                            &t_upper_redundant_indices);
+  EXPECT_TRUE(C_redundant_indices.empty());
+  EXPECT_EQ(t_lower_redundant_indices, std::unordered_set<int>({0, 1}));
+  EXPECT_EQ(t_upper_redundant_indices, std::unordered_set<int>({0, 1}));
+  // Set tighten = 0.6, now the bound t_lower <= t <= t_upper is not redundant.
+  tighten = 0.6;
+  FindRedundantInequalities(C, d, t_lower, t_upper, tighten,
+                            &C_redundant_indices, &t_lower_redundant_indices,
+                            &t_upper_redundant_indices);
+  EXPECT_TRUE(C_redundant_indices.empty());
+  EXPECT_TRUE(t_lower_redundant_indices.empty());
+  EXPECT_TRUE(t_upper_redundant_indices.empty());
+  // Set tighten = -3.1, now C*t<=d is redundant.
+  tighten = -3.1;
+  FindRedundantInequalities(C, d, t_lower, t_upper, tighten,
+                            &C_redundant_indices, &t_lower_redundant_indices,
+                            &t_upper_redundant_indices);
+  EXPECT_EQ(C_redundant_indices, std::unordered_set<int>({0, 1, 2, 3}));
+  EXPECT_EQ(t_lower_redundant_indices, std::unordered_set<int>({0, 1}));
+  EXPECT_EQ(t_upper_redundant_indices, std::unordered_set<int>({0, 1}));
+}
+
 }  // namespace multibody
 }  // namespace drake
+
+int main(int argc, char** argv) {
+  // Ensure that we have the MOSEK license for the entire duration of this test,
+  // so that we do not have to release and re-acquire the license for every
+  // test.
+  auto mosek_license = drake::solvers::MosekSolver::AcquireLicense();
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

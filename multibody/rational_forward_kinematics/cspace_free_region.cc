@@ -9,6 +9,7 @@
 #include "drake/geometry/optimization/vpolytope.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
+#include "drake/multibody/rational_forward_kinematics/redundant_inequality_pruning.h"
 #include "drake/solvers/mosek_solver.h"
 #include "drake/solvers/solve.h"
 
@@ -641,8 +642,8 @@ CspaceFreeRegion::ConstructLagrangianProgram(
     const VectorX<symbolic::Variable>& separating_plane_vars,
     const Eigen::Ref<const Eigen::VectorXd>& t_lower,
     const Eigen::Ref<const Eigen::VectorXd>& t_upper,
-    const VerificationOption& option, MatrixX<symbolic::Variable>* P,
-    VectorX<symbolic::Variable>* q) const {
+    const VerificationOption& option, std::optional<double> redundant_tighten,
+    MatrixX<symbolic::Variable>* P, VectorX<symbolic::Variable>* q) const {
   // TODO(hongkai.dai): support more nonnegative polynomials.
   if (option.lagrangian_type !=
       solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
@@ -671,6 +672,14 @@ CspaceFreeRegion::ConstructLagrangianProgram(
   VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
   ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper, &t_minus_t_lower,
                              &t_upper_minus_t);
+  // find the redundant inequalities.
+  std::unordered_set<int> C_redundant_indices, t_lower_redundant_indices,
+      t_upper_redundant_indices;
+  if (redundant_tighten.has_value()) {
+    FindRedundantInequalities(C, d, t_lower, t_upper, redundant_tighten.value(),
+                              &C_redundant_indices, &t_lower_redundant_indices,
+                              &t_upper_redundant_indices);
+  }
   // For each rational numerator, add the constraint that the Lagrangian
   // polynomials >= 0, and the verified polynomial >= 0.
   //
@@ -690,37 +699,52 @@ CspaceFreeRegion::ConstructLagrangianProgram(
     }
     MatrixX<symbolic::Variable>& gram_mat = it->second;
 
-    // This lambda does three things.
+    // This lambda does these things.
+    // If redundant = False, namely this constraint is not redundant, then
     // 1. Compute the Gram matrix.
     // 2. Constraint the Gram matrix to be PSD.
     // 3. subtract lagrangian(t) * constraint_polynomial from
     // verified_polynomial.
+    // If redundant = True, then
+    // 1. Set the Gram variables to be 0.
     auto constrain_lagrangian =
         [&gram_mat, &verified_polynomial, &lagrangian_gram_vars, &prog,
          gram_lower_size](int lagrangian_gram_lower_start,
                           const VectorX<symbolic::Monomial>& monomial_basis,
-                          const symbolic::Polynomial& constraint_polynomial) {
-          SymmetricMatrixFromLower<symbolic::Variable>(
-              gram_mat.rows(),
-              lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
-                                           gram_lower_size),
-              &gram_mat);
-          prog->AddPositiveSemidefiniteConstraint(gram_mat);
-          verified_polynomial -= CalcPolynomialFromGram<symbolic::Variable>(
-                                     monomial_basis, gram_mat) *
-                                 constraint_polynomial;
+                          const symbolic::Polynomial& constraint_polynomial,
+                          bool redundant) {
+          if (redundant) {
+            prog->AddBoundingBoxConstraint(
+                0, 0,
+                lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
+                                             gram_lower_size));
+
+          } else {
+            SymmetricMatrixFromLower<symbolic::Variable>(
+                gram_mat.rows(),
+                lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
+                                             gram_lower_size),
+                &gram_mat);
+            prog->AddPositiveSemidefiniteConstraint(gram_mat);
+            verified_polynomial -= CalcPolynomialFromGram<symbolic::Variable>(
+                                       monomial_basis, gram_mat) *
+                                   constraint_polynomial;
+          }
         };
     // Handle lagrangian l_polytope(t).
     for (int i = 0; i < C.rows(); ++i) {
       constrain_lagrangian(tuple.polytope_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, d_minus_Ct(i));
+                           tuple.monomial_basis, d_minus_Ct(i),
+                           C_redundant_indices.count(i) > 0);
     }
     // Handle lagrangian l_lower(t) and l_upper(t).
     for (int i = 0; i < t.rows(); ++i) {
       constrain_lagrangian(tuple.t_lower_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, t_minus_t_lower(i));
+                           tuple.monomial_basis, t_minus_t_lower(i),
+                           t_lower_redundant_indices.count(i) > 0);
       constrain_lagrangian(tuple.t_upper_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, t_upper_minus_t(i));
+                           tuple.monomial_basis, t_upper_minus_t(i),
+                           t_upper_redundant_indices.count(i) > 0);
     }
     // Now constrain that verified_polynomial is non-negative.
     SymmetricMatrixFromLower<symbolic::Variable>(
@@ -788,11 +812,16 @@ CspaceFreeRegion::ConstructPolytopeProgram(
                            &monomial_basis, gram_lower_size](
                               int lagrangian_var_start,
                               const symbolic::Polynomial& constraint) {
-      verified_polynomial -=
-          CalcPolynomialFromGramLower<double>(
-              monomial_basis, lagrangian_gram_var_vals.segment(
-                                  lagrangian_var_start, gram_lower_size)) *
-          constraint;
+      if ((lagrangian_gram_var_vals
+               .segment(lagrangian_var_start, gram_lower_size)
+               .array() != 0)
+              .any()) {
+        verified_polynomial -=
+            CalcPolynomialFromGramLower<double>(
+                monomial_basis, lagrangian_gram_var_vals.segment(
+                                    lagrangian_var_start, gram_lower_size)) *
+            constraint;
+      }
     };
 
     for (int i = 0; i < C.rows(); ++i) {
@@ -938,7 +967,8 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     auto prog_lagrangian = ConstructLagrangianProgram(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
         verified_gram_vars, separating_plane_vars, t_lower, t_upper,
-        verification_option, &P, &q);
+        verification_option, bilinear_alternation_option.redundant_tighten, &P,
+        &q);
     auto [log_det_cost, log_det_t, log_det_Z] =
         prog_lagrangian->AddMaximizeLogDeterminantCost(
             P.cast<symbolic::Expression>());
@@ -1059,10 +1089,11 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
                                      &separating_plane_vars, &t_lower, &t_upper,
                                      &verification_option, &solver_options,
                                      d_final](const Eigen::VectorXd& d) {
+    const double redundant_tighten = 0.;
     auto prog = this->ConstructLagrangianProgram(
         alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-        separating_plane_vars, t_lower, t_upper, verification_option, nullptr,
-        nullptr);
+        separating_plane_vars, t_lower, t_upper, verification_option,
+        redundant_tighten, nullptr, nullptr);
     // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
     // empty. We find t_nominal satisfying these constraints.
     // TODO(hongkai.dai): find the lower bound of epsilon such that
@@ -1396,6 +1427,40 @@ std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     }
   }
   return ret;
+}
+
+void FindRedundantInequalities(
+    const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
+    const Eigen::VectorXd& t_lower, const Eigen::VectorXd& t_upper,
+    double tighten, std::unordered_set<int>* C_redundant_indices,
+    std::unordered_set<int>* t_lower_redundant_indices,
+    std::unordered_set<int>* t_upper_redundant_indices) {
+  C_redundant_indices->clear();
+  t_lower_redundant_indices->clear();
+  t_upper_redundant_indices->clear();
+  // We aggregate the constraint {C*t<=d, t_lower <= t <= t_upper} as C̅t ≤ d̅
+  const int nt = t_lower.rows();
+  Eigen::MatrixXd C_bar(C.rows() + 2 * nt, nt);
+  Eigen::VectorXd d_bar(d.rows() + 2 * nt);
+  C_bar << C, Eigen::MatrixXd::Identity(nt, nt),
+      -Eigen::MatrixXd::Identity(nt, nt);
+  d_bar << d, t_upper, -t_lower;
+  const std::vector<int> redundant_indices =
+      FindRedundantInequalitiesInHPolyhedronByIndex(C_bar, d_bar, tighten);
+  C_redundant_indices->reserve(redundant_indices.size());
+  t_lower_redundant_indices->reserve(redundant_indices.size());
+  t_upper_redundant_indices->reserve(redundant_indices.size());
+  for (const int index : redundant_indices) {
+    if (index < C.rows()) {
+      C_redundant_indices->emplace_hint(C_redundant_indices->end(), index);
+    } else if (index < C.rows() + nt) {
+      t_upper_redundant_indices->emplace_hint(t_upper_redundant_indices->end(),
+                                              index - C.rows());
+    } else {
+      t_lower_redundant_indices->emplace_hint(t_lower_redundant_indices->end(),
+                                              index - C.rows() - nt);
+    }
+  }
 }
 
 // Explicit instantiation.

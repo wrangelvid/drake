@@ -23,7 +23,7 @@ namespace multibody {
  */
 std::vector<int> FindRedundantInequalitiesInHPolyhedronByIndex(
     const Eigen::Ref<const Eigen::MatrixXd>& C,
-    const Eigen::Ref<const Eigen::VectorXd>& d, double tol = 0.);
+    const Eigen::Ref<const Eigen::VectorXd>& d, double tighten = 0.);
 
 }  // namespace multibody
 }  // namespace drake
