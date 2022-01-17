@@ -120,6 +120,9 @@ HPolyhedron Iris(const ConvexSets& obstacles, const Ref<const VectorXd>& sample,
   return P;
 }
 
+
+
+
 namespace {
 // Constructs a ConvexSet for each supported Shape and adds it to the set.
 class IrisConvexSetMaker final : public ShapeReifier {
@@ -278,6 +281,7 @@ class SamePointConstraint : public solvers::Constraint {
         *context_, JacobianWrtVariable::kQDot, *frameB_,
         ExtractDoubleOrThrow(p_BB), plant_->world_frame(),
         plant_->world_frame(), &Jq_v_WB);
+
     *y = X_WA.cast<AutoDiffXd>() * p_AA - X_WB.cast<AutoDiffXd>() * p_BB;
     // Now add it the dydq terms.  We don't use the standard autodiff tools
     // because these only impact a subset of the autodiff derivatives.
@@ -308,6 +312,7 @@ class SamePointConstraint : public solvers::Constraint {
     *y = p_WA - p_WB;
   }
 
+ protected:
   const MultibodyPlant<double>* const plant_;
   const multibody::Frame<double>* frameA_{nullptr};
   const multibody::Frame<double>* frameB_{nullptr};
@@ -323,29 +328,106 @@ class SamePointConstraintRational : public SamePointConstraint{
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SamePointConstraintRational)
 
     SamePointConstraintRational(
-        const multibody::RationalForwardKinematics& rational_forward_kinematics,
+        const multibody::RationalForwardKinematics* rational_forward_kinematics_ptr,
+        const Eigen::Ref<const Eigen::VectorXd>& q_star,
         const Context<double>& context)
-        : SamePointConstraint(&rational_forward_kinematics.plant(), context){
+        : SamePointConstraint(&rational_forward_kinematics_ptr->plant(), context),
+        rational_forward_kinematics_ptr_(rational_forward_kinematics_ptr),
+        q_star_(q_star)
+        {}
 
+    ~SamePointConstraintRational() override {}
+
+ private:
+  void DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
+              Eigen::VectorXd* y) const override {
+    DRAKE_DEMAND(frameA_ != nullptr);
+    DRAKE_DEMAND(frameB_ != nullptr);
+    VectorXd t = x.head(plant_->num_positions());
+    VectorXd q = rational_forward_kinematics_ptr_->ComputeQValue(t, q_star_);
+    Vector3d p_AA = x.template segment<3>(plant_->num_positions()),
+             p_BB = x.template tail<3>();
+    Vector3d p_WA, p_WB;
+    plant_->SetPositions(context_.get(), q);
+    plant_->CalcPointsPositions(*context_, *frameA_, p_AA,
+                                plant_->world_frame(), &p_WA);
+    plant_->CalcPointsPositions(*context_, *frameB_, p_BB,
+                                plant_->world_frame(), &p_WB);
+    *y = p_WA - p_WB;
+  }
+
+
+  void DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
+              AutoDiffVecXd* y) const override {
+
+    DRAKE_DEMAND(frameA_ != nullptr);
+    DRAKE_DEMAND(frameB_ != nullptr);
+    VectorX<AutoDiffXd> t = x.head(plant_->num_positions());
+    VectorX<AutoDiffXd> q = rational_forward_kinematics_ptr_->ComputeQValue(t, q_star_);
+
+
+    Vector3<AutoDiffXd> p_AA = x.template segment<3>(plant_->num_positions()),
+                        p_BB = x.template tail<3>();
+    plant_->SetPositions(context_.get(), ExtractDoubleOrThrow(q));
+    const RigidTransform<double>& X_WA =
+        plant_->EvalBodyPoseInWorld(*context_, frameA_->body());
+    const RigidTransform<double>& X_WB =
+        plant_->EvalBodyPoseInWorld(*context_, frameB_->body());
+    Eigen::Matrix3Xd Jq_v_WA(3, plant_->num_positions()),
+        Jq_v_WB(3, plant_->num_positions());
+    plant_->CalcJacobianTranslationalVelocity(
+        *context_, JacobianWrtVariable::kQDot, *frameA_,
+        ExtractDoubleOrThrow(p_AA), plant_->world_frame(),
+        plant_->world_frame(), &Jq_v_WA);
+    plant_->CalcJacobianTranslationalVelocity(
+        *context_, JacobianWrtVariable::kQDot, *frameB_,
+        ExtractDoubleOrThrow(p_BB), plant_->world_frame(),
+        plant_->world_frame(), &Jq_v_WB);
+    Eigen::Matrix3Xd Jt_v_WA(3, plant_->num_positions()),
+        Jt_v_WB(3, plant_->num_positions());
+    for (int i = 0; i < plant_->num_positions(); i++){
+      // dX_t_wa = dJ_q_WA * dq_dt
+      Jt_v_WA.col(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
+      Jt_v_WB.col(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
     }
-//        solvers::Constraint(
-//              3,
-//              rational_forward_kinematics.plant()
-//                  ? rational_forward_kinematics.plant().num_positions() + 6
-//                  : 0,
-//              Vector3d::Zero(), Vector3d::Zero()),
-//              plant_(*rational_forward_kinematics.plant()){}
 
 
+    *y = X_WA.cast<AutoDiffXd>() * p_AA - X_WB.cast<AutoDiffXd>() * p_BB;
+    // Now add it the dydq terms.  We don't use the standard autodiff tools
+    // because these only impact a subset of the autodiff derivatives.
+    for (int i = 0; i < 3; i++) {
+      (*y)[i].derivatives().head(plant_->num_positions()) +=
+          (Jt_v_WA.row(i) - Jt_v_WB.row(i)).transpose();
+    }
+  }
 
-  const MultibodyPlant<double>* const plant_;
-  const multibody::Frame<double>* frameA_{nullptr};
-  const multibody::Frame<double>* frameB_{nullptr};
-  std::unique_ptr<Context<double>> context_;
+  void DoEval(const Ref<const VectorX<symbolic::Variable>>& x,
+              VectorX<symbolic::Expression>* y) const override {
+    DRAKE_DEMAND(symbolic_plant_ != nullptr);
+    DRAKE_DEMAND(frameA_ != nullptr);
+    DRAKE_DEMAND(frameB_ != nullptr);
+    const Frame<Expression>& frameA =
+        symbolic_plant_->get_frame(frameA_->index());
+    const Frame<Expression>& frameB =
+        symbolic_plant_->get_frame(frameB_->index());
+    VectorX<Expression> t = x.head(plant_->num_positions());
+    VectorX<Expression> q = rational_forward_kinematics_ptr_->ComputeQValue(t, q_star_);
+    Vector3<Expression> p_AA = x.template segment<3>(plant_->num_positions()),
+                        p_BB = x.template tail<3>();
+    Vector3<Expression> p_WA, p_WB;
+    symbolic_plant_->SetPositions(symbolic_context_.get(), q);
+    symbolic_plant_->CalcPointsPositions(*symbolic_context_, frameA, p_AA,
+                                         symbolic_plant_->world_frame(), &p_WA);
+    symbolic_plant_->CalcPointsPositions(*symbolic_context_, frameB, p_BB,
+                                         symbolic_plant_->world_frame(), &p_WB);
+    *y = p_WA - p_WB;
+  }
+ protected:
+  const multibody::RationalForwardKinematics* rational_forward_kinematics_ptr_;
+  const Eigen::VectorXd q_star_;
 
-  std::unique_ptr<MultibodyPlant<Expression>> symbolic_plant_{nullptr};
-  std::unique_ptr<Context<Expression>> symbolic_context_{nullptr};
 };
+
 
 
 // Solves the optimization
@@ -616,27 +698,42 @@ HPolyhedron IrisInConfigurationSpace(const MultibodyPlant<double>& plant,
 }
 
 
-HPolyhedron IrisInConfigurationSpace(
+HPolyhedron IrisInRationalConfigurationSpace(
     const multibody::MultibodyPlant<double>& plant,
     const systems::Context<double>& context,
-    const Eigen::Ref<const Eigen::VectorXd>& q_star,
-    const HPolyhedron starting_hpolyhedron,
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace()) {
+    const IrisOptionsRationalSpace& options) {
 
   // Check the inputs.
   plant.ValidateContext(context);
   const int nt = plant.num_positions();
   const multibody::RationalForwardKinematics rational_forward_kinematics(plant);
 
+  Eigen::VectorXd q_star;
+  if (options.q_star_ptr == nullptr){
+    q_star.setZero(nt);
+  }
+  else{
+    q_star = *options.q_star_ptr;
+  }
+  DRAKE_DEMAND(q_star.rows() == nt);
+
   const Eigen::VectorXd sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
   const Eigen::VectorXd t_lower_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionLowerLimits(), q_star);
   const Eigen::VectorXd t_upper_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionUpperLimits(), q_star);
 
-  HPolyhedron P_joint_limits = HPolyhedron(t_lower_limits, t_upper_limits);
-  DRAKE_DEMAND(P_joint_limits.A().rows() == 2 * nt);
-  DRAKE_DEMAND(starting_hpolyhedron.ContainedInOtherHPolyhedron(P_joint_limits));
+  HPolyhedron P(Eigen::Matrix2d::Identity(), Eigen::Vector2d::Zero());
+  if(options.starting_hpolyhedron_ptr == nullptr) {
+    P = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+  }
+  else{
+    HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+    P = HPolyhedron((*options.starting_hpolyhedron_ptr).A(), (*options.starting_hpolyhedron_ptr).b());
+    // ensure that our starting HPolyhedron starts within the joint limits
+    DRAKE_DEMAND(P.ContainedInOtherHPolyhedron(P_joint_limits));
+  }
+  DRAKE_DEMAND(P.A().rows() >= 2 * nt);
 
-  const double kEpsilonEllipsoid = 1e-2;
+  const double kEpsilonEllipsoid = 1e-5;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
 
   // Make all of the convex sets and supporting quantities.
@@ -662,10 +759,125 @@ HPolyhedron IrisInConfigurationSpace(
 
   auto pairs = inspector.GetCollisionCandidates();
   const int N = static_cast<int>(pairs.size());
+
   auto same_point_constraint =
-      std::make_shared<SamePointConstraint>(&plant, context);
+      std::make_shared<SamePointConstraintRational>(&rational_forward_kinematics, q_star, context);
+
+  // As a surrogate for the true objective, the pairs are sorted by the distance
+  // between each collision pair from the sample point configuration. This could
+  // improve computation times in Ibex here and produce regions with fewer
+  // faces.
+  std::vector<GeometryPairWithDistance> sorted_pairs;
+  for (const auto& [geomA, geomB] : pairs) {
+    sorted_pairs.emplace_back(
+        geomA, geomB,
+        query_object.ComputeSignedDistancePairClosestPoints(geomA, geomB)
+            .distance);
+  }
+  std::sort(sorted_pairs.begin(), sorted_pairs.end());
 
 
+  // On each iteration, we will build the collision-free polytope represented as
+  // {x | A * x <= b}.  Here we pre-allocate matrices with a generous maximum
+  // size.
+  Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> A(
+      P.A().rows() + 2 * N, nt);
+  VectorXd b(P.A().rows() + 2 * N);
+  A.topRows(P.A().rows()) = P.A();
+  b.head(P.A().rows()) = P.b();
+
+  double best_volume = E.Volume();
+  int iteration = 0;
+  VectorXd closest(nt);
+
+
+  auto solver = solvers::MakeFirstAvailableSolver(
+      {solvers::SnoptSolver::id(), solvers::IpoptSolver::id()});
+  std::unique_ptr<solvers::IbexSolver> ibex;
+  if (options.enable_ibex) {
+    ibex = std::make_unique<solvers::IbexSolver>();
+    DRAKE_DEMAND(ibex->is_available() && ibex->is_enabled());
+    same_point_constraint->EnableSymbolic();
+  }
+
+
+
+  while (true) {
+    int num_constraints = 2 * nt;  // Start with just the joint limits.
+    bool sample_point_requirement = true;
+    DRAKE_ASSERT(best_volume > 0);
+    // Find separating hyperplanes
+
+    // First use a fast nonlinear optimizer to add as many constraint as it
+    // can find.
+    for (const auto& pair : sorted_pairs) {
+      while (sample_point_requirement &&
+             FindClosestCollision(
+                 same_point_constraint, *frames.at(pair.geomA),
+                 *frames.at(pair.geomB), *sets.at(pair.geomA),
+                 *sets.at(pair.geomB), E, A.topRows(num_constraints),
+                 b.head(num_constraints), *solver, sample, &closest)) {
+        AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
+        if (options.require_sample_point_is_contained) {
+          sample_point_requirement =
+              A.row(num_constraints - 1) * sample <= b(num_constraints - 1);
+        }
+      }
+    }
+
+    if (options.enable_ibex) {
+      // Now loop back through and use Ibex for rigorous certification.
+      // TODO(russt): Consider (re-)implementing a "feasibility only" version of
+      // the IRIS check + nonlinear optimization to improve.
+      for (const auto& pair : sorted_pairs) {
+        while (sample_point_requirement &&
+               FindClosestCollision(
+                   same_point_constraint, *frames.at(pair.geomA),
+                   *frames.at(pair.geomB), *sets.at(pair.geomA),
+                   *sets.at(pair.geomB), E, A.topRows(num_constraints),
+                   b.head(num_constraints), *ibex, sample, &closest)) {
+          AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
+          if (options.require_sample_point_is_contained) {
+            sample_point_requirement =
+                A.row(num_constraints - 1) * sample <= b(num_constraints - 1);
+          }
+        }
+      }
+    }
+
+    if (options.certify_region_with_sos_during_generation)
+    {
+      // TODO (amice): certify and update in here
+    }
+
+    if (!sample_point_requirement) {
+      break;
+    }
+    P = HPolyhedron(A.topRows(num_constraints), b.head(num_constraints));
+
+    iteration++;
+    if (iteration >= options.iteration_limit) {
+      break;
+    }
+
+    E = P.MaximumVolumeInscribedEllipsoid();
+    const double volume = E.Volume();
+    const double delta_volume = volume - best_volume;
+    if (delta_volume <= options.termination_threshold) {
+      break;
+    }
+    if (delta_volume / best_volume <= options.relative_termination_threshold) {
+      break;
+    }
+    best_volume = volume;
+  }
+  if (options.certify_region_with_sos_after_generation){
+    //TODO (amice): put the certification code in here
+  }
+  const Vector2<symbolic::Expression> xy{symbolic::Variable("x"),
+                                         symbolic::Variable("y")};
+  HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+  return P;
 }
 
 

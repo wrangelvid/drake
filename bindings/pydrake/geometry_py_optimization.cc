@@ -231,12 +231,63 @@ void DefineGeometryOptimization(py::module m) {
                 self.relative_termination_threshold,
                 self.configuration_space_margin, self.enable_ibex);
       });
+  py::class_<IrisOptionsRationalSpace>(m, "IrisOptionsRationalSpace", doc.IrisOptionsRationalSpace.doc)
+      .def(py::init<>(), doc.IrisOptionsRationalSpace.ctor.doc)
+      .def_readwrite("require_sample_point_is_contained",
+          &IrisOptionsRationalSpace::require_sample_point_is_contained,
+          doc.IrisOptions.require_sample_point_is_contained.doc)
+      .def_readwrite("iteration_limit", &IrisOptionsRationalSpace::iteration_limit,
+          doc.IrisOptions.iteration_limit.doc)
+      .def_readwrite("termination_threshold",
+          &IrisOptionsRationalSpace::termination_threshold,
+          doc.IrisOptions.termination_threshold.doc)
+      .def_readwrite("relative_termination_threshold",
+          &IrisOptionsRationalSpace::relative_termination_threshold,
+          doc.IrisOptions.relative_termination_threshold.doc)
+      .def_readwrite("configuration_space_margin",
+          &IrisOptionsRationalSpace::configuration_space_margin,
+          doc.IrisOptions.configuration_space_margin.doc)
+      .def_readwrite("enable_ibex", &IrisOptionsRationalSpace::enable_ibex,
+          doc.IrisOptions.enable_ibex.doc)
+      .def_readwrite("certify_region_with_sos_during_generation", &IrisOptionsRationalSpace::certify_region_with_sos_during_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
+      .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
+      .def("get_q_star", &IrisOptionsRationalSpace::get_q_star)
+      .def("set_q_star", &IrisOptionsRationalSpace::set_q_star, py::arg("q_star"))
+      .def("get_starting_hpolyhedron", &IrisOptionsRationalSpace::get_starting_hpolyhedron)
+      .def("set_starting_hpolyhedron", &IrisOptionsRationalSpace::set_starting_hpolyhedron, py::arg("starting_hpolyhedron"))
+      .def("__repr__", [](const IrisOptionsRationalSpace& self) {
+        return py::str(
+            "IrisOptionsRationalSpace("
+            "require_sample_point_is_contained={}, "
+            "iteration_limit={}, "
+            "termination_threshold={}, "
+            "relative_termination_threshold={}, "
+            "configuration_space_margin={}, "
+            "enable_ibex={}"
+            "certify_region_with_sos_during_generation={}"
+            "certify_region_with_sos_after_generation={}"
+            ")")
+            .format(self.require_sample_point_is_contained,
+                self.iteration_limit, self.termination_threshold,
+                self.relative_termination_threshold,
+                self.configuration_space_margin, self.enable_ibex,
+                self.certify_region_with_sos_during_generation,
+                self.certify_region_with_sos_after_generation
+                );
+      });
 
   m.def("Iris", &Iris, py::arg("obstacles"), py::arg("sample"),
       py::arg("domain"), py::arg("options") = IrisOptions(), doc.Iris.doc);
 
   m.def("MakeIrisObstacles", &MakeIrisObstacles, py::arg("query_object"),
       py::arg("reference_frame") = std::nullopt, doc.MakeIrisObstacles.doc);
+
+  m.def("IrisInRationalConfigurationSpace", &IrisInRationalConfigurationSpace,
+      py::arg("plant"), py::arg("context"),
+      py::arg("options") = IrisOptionsRationalSpace(),
+      doc.IrisInRationalConfigurationSpace.doc);
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,
