@@ -100,6 +100,10 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("reference_frame") = std::nullopt, cls_doc.ctor.doc_3args)
         .def("A", &HPolyhedron::A, cls_doc.A.doc)
         .def("b", &HPolyhedron::b, cls_doc.b.doc)
+        .def("ContainedInOtherHPolyhedron", &HPolyhedron::ContainedInOtherHPolyhedron,
+             cls_doc.ContainedInOtherHPolyhedron.doc)
+        .def("IrredundantUnion", &HPolyhedron::IrredundantUnion,
+             cls_doc.IrredundantUnion.doc)
         .def("MaximumVolumeInscribedEllipsoid",
             &HPolyhedron::MaximumVolumeInscribedEllipsoid,
             cls_doc.MaximumVolumeInscribedEllipsoid.doc)
@@ -253,10 +257,8 @@ void DefineGeometryOptimization(py::module m) {
           doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
       .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
           doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
-      .def("get_q_star", &IrisOptionsRationalSpace::get_q_star)
-      .def("set_q_star", &IrisOptionsRationalSpace::set_q_star, py::arg("q_star"))
-      .def("get_starting_hpolyhedron", &IrisOptionsRationalSpace::get_starting_hpolyhedron)
-      .def("set_starting_hpolyhedron", &IrisOptionsRationalSpace::set_starting_hpolyhedron, py::arg("starting_hpolyhedron"))
+      .def_readwrite("q_star", &IrisOptionsRationalSpace::q_star,
+                     doc.IrisOptionsRationalSpace.q_star.doc)
       .def("__repr__", [](const IrisOptionsRationalSpace& self) {
         return py::str(
             "IrisOptionsRationalSpace("
@@ -284,10 +286,23 @@ void DefineGeometryOptimization(py::module m) {
   m.def("MakeIrisObstacles", &MakeIrisObstacles, py::arg("query_object"),
       py::arg("reference_frame") = std::nullopt, doc.MakeIrisObstacles.doc);
 
-  m.def("IrisInRationalConfigurationSpace", &IrisInRationalConfigurationSpace,
+  m.def("IrisInRationalConfigurationSpace",
+        py::overload_cast<const multibody::MultibodyPlant<double>&,
+          const systems::Context<double>&, const std::optional<HPolyhedron>&,
+          const IrisOptionsRationalSpace&>(
+          &IrisInRationalConfigurationSpace),
       py::arg("plant"), py::arg("context"),
-      py::arg("options") = IrisOptionsRationalSpace(),
-      doc.IrisInRationalConfigurationSpace.doc);
+      py::arg("starting_polyhedron"),
+      py::arg("options") = IrisOptionsRationalSpace()
+      );
+
+  m.def("IrisInRationalConfigurationSpace",
+        py::overload_cast<const multibody::MultibodyPlant<double>&,
+          const systems::Context<double>&, const IrisOptionsRationalSpace&>(
+          &IrisInRationalConfigurationSpace),
+      py::arg("plant"), py::arg("context"),
+      py::arg("options") = IrisOptionsRationalSpace()
+      );
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,

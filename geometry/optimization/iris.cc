@@ -120,9 +120,6 @@ HPolyhedron Iris(const ConvexSets& obstacles, const Ref<const VectorXd>& sample,
   return P;
 }
 
-
-
-
 namespace {
 // Constructs a ConvexSet for each supported Shape and adds it to the set.
 class IrisConvexSetMaker final : public ShapeReifier {
@@ -386,7 +383,7 @@ class SamePointConstraintRational : public SamePointConstraint{
     Eigen::Matrix3Xd Jt_v_WA(3, plant_->num_positions()),
         Jt_v_WB(3, plant_->num_positions());
     for (int i = 0; i < plant_->num_positions(); i++){
-      // dX_t_wa = dJ_q_WA * dq_dt
+      // dX_t_wa = J_q_WA * dq_dt
       Jt_v_WA.col(i) = Jq_v_WA.col(i)*q(i).derivatives()(i);
       Jt_v_WB.col(i) = Jq_v_WB.col(i)*q(i).derivatives()(i);
     }
@@ -701,6 +698,7 @@ HPolyhedron IrisInConfigurationSpace(const MultibodyPlant<double>& plant,
 HPolyhedron IrisInRationalConfigurationSpace(
     const multibody::MultibodyPlant<double>& plant,
     const systems::Context<double>& context,
+    const std::optional<HPolyhedron>& starting_hpolyhedron,
     const IrisOptionsRationalSpace& options) {
 
   // Check the inputs.
@@ -708,36 +706,43 @@ HPolyhedron IrisInRationalConfigurationSpace(
   const int nt = plant.num_positions();
   const multibody::RationalForwardKinematics rational_forward_kinematics(plant);
 
-  Eigen::VectorXd q_star;
-  if (options.q_star_ptr == nullptr){
+
+  Eigen::VectorXd q_star(nt);
+  if (!options.q_star.has_value()){
     q_star.setZero(nt);
   }
   else{
-    q_star = *options.q_star_ptr;
+    q_star = options.q_star.value();
   }
   DRAKE_DEMAND(q_star.rows() == nt);
 
-  const Eigen::VectorXd sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
+
+  const Eigen::VectorXd t_sample = rational_forward_kinematics.ComputeTValue(plant.GetPositions(context), q_star);
   const Eigen::VectorXd t_lower_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionLowerLimits(), q_star);
   const Eigen::VectorXd t_upper_limits = rational_forward_kinematics.ComputeTValue(plant.GetPositionUpperLimits(), q_star);
 
-  HPolyhedron P(Eigen::Matrix2d::Identity(), Eigen::Vector2d::Zero());
-  if(options.starting_hpolyhedron_ptr == nullptr) {
-    P = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+  std::unique_ptr<HPolyhedron> P_ptr{nullptr};
+
+  if(starting_hpolyhedron.has_value()){
+      HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
+      // ensure that our starting HPolyhedron starts within the joint limits
+      P_ptr = std::make_unique<HPolyhedron>(
+              starting_hpolyhedron.value().IrredundantUnion(P_joint_limits)
+      );
   }
   else{
-    HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
-    P = HPolyhedron((*options.starting_hpolyhedron_ptr).A(), (*options.starting_hpolyhedron_ptr).b());
-    // ensure that our starting HPolyhedron starts within the joint limits
-    DRAKE_DEMAND(P.ContainedInOtherHPolyhedron(P_joint_limits));
+      P_ptr = std::make_unique<HPolyhedron>(
+              HPolyhedron::MakeBox(t_lower_limits, t_upper_limits)
+      );
   }
+  HPolyhedron P = *P_ptr;
   DRAKE_DEMAND(P.A().rows() >= 2 * nt);
 
   const double kEpsilonEllipsoid = 1e-5;
-  Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, sample);
+  Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, t_sample);
 
   // Make all of the convex sets and supporting quantities.
-  // TODO(amice): should we provide a way that we don't have to run this for every sample point?
+  // TODO(amice): should we provide a way that we don't have to run this for every t_sample point?
   auto query_object =
       plant.get_geometry_query_input_port().Eval<QueryObject<double>>(context);
   const SceneGraphInspector<double>& inspector = query_object.inspector();
@@ -764,7 +769,7 @@ HPolyhedron IrisInRationalConfigurationSpace(
       std::make_shared<SamePointConstraintRational>(&rational_forward_kinematics, q_star, context);
 
   // As a surrogate for the true objective, the pairs are sorted by the distance
-  // between each collision pair from the sample point configuration. This could
+  // between each collision pair from the t_sample point configuration. This could
   // improve computation times in Ibex here and produce regions with fewer
   // faces.
   std::vector<GeometryPairWithDistance> sorted_pairs;
@@ -813,14 +818,14 @@ HPolyhedron IrisInRationalConfigurationSpace(
     for (const auto& pair : sorted_pairs) {
       while (sample_point_requirement &&
              FindClosestCollision(
-                 same_point_constraint, *frames.at(pair.geomA),
-                 *frames.at(pair.geomB), *sets.at(pair.geomA),
-                 *sets.at(pair.geomB), E, A.topRows(num_constraints),
-                 b.head(num_constraints), *solver, sample, &closest)) {
+                     same_point_constraint, *frames.at(pair.geomA),
+                     *frames.at(pair.geomB), *sets.at(pair.geomA),
+                     *sets.at(pair.geomB), E, A.topRows(num_constraints),
+                     b.head(num_constraints), *solver, t_sample, &closest)) {
         AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
         if (options.require_sample_point_is_contained) {
           sample_point_requirement =
-              A.row(num_constraints - 1) * sample <= b(num_constraints - 1);
+                  A.row(num_constraints - 1) * t_sample <= b(num_constraints - 1);
         }
       }
     }
@@ -832,14 +837,14 @@ HPolyhedron IrisInRationalConfigurationSpace(
       for (const auto& pair : sorted_pairs) {
         while (sample_point_requirement &&
                FindClosestCollision(
-                   same_point_constraint, *frames.at(pair.geomA),
-                   *frames.at(pair.geomB), *sets.at(pair.geomA),
-                   *sets.at(pair.geomB), E, A.topRows(num_constraints),
-                   b.head(num_constraints), *ibex, sample, &closest)) {
+                       same_point_constraint, *frames.at(pair.geomA),
+                       *frames.at(pair.geomB), *sets.at(pair.geomA),
+                       *sets.at(pair.geomB), E, A.topRows(num_constraints),
+                       b.head(num_constraints), *ibex, t_sample, &closest)) {
           AddTangentToPolytope(E, closest, options, &A, &b, &num_constraints);
           if (options.require_sample_point_is_contained) {
             sample_point_requirement =
-                A.row(num_constraints - 1) * sample <= b(num_constraints - 1);
+                    A.row(num_constraints - 1) * t_sample <= b(num_constraints - 1);
           }
         }
       }
@@ -878,6 +883,15 @@ HPolyhedron IrisInRationalConfigurationSpace(
                                          symbolic::Variable("y")};
   HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
   return P;
+}
+
+HPolyhedron IrisInRationalConfigurationSpace(
+    const multibody::MultibodyPlant<double>& plant,
+    const systems::Context<double>& context,
+    const IrisOptionsRationalSpace& options) {
+    std::optional<HPolyhedron> P;
+
+    return IrisInRationalConfigurationSpace(plant, context, P, options);
 }
 
 

@@ -535,6 +535,7 @@ VectorX<Expression> RationalForwardKinematics::ComputeTValue(
   return t_val;
 }
 
+// TODO(hongkai.dai) templatize this code
 Eigen::VectorXd RationalForwardKinematics::ComputeQValue(
     const Eigen::Ref<const Eigen::VectorXd>& t_val,
     const Eigen::Ref<const Eigen::VectorXd>& q_star_val) const {

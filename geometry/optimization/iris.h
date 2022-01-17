@@ -148,7 +148,6 @@ HPolyhedron IrisInConfigurationSpace(
     const Eigen::Ref<const Eigen::VectorXd>& sample,
     const IrisOptions& options = IrisOptions());
 
-// TODO: is this the proper way to redefine these options?
 struct IrisOptionsRationalSpace : public IrisOptions {
   IrisOptionsRationalSpace() = default;
 
@@ -171,31 +170,7 @@ struct IrisOptionsRationalSpace : public IrisOptions {
 
   /** For IRIS in rational configuration space we need a point around which to perform the stereographic projection
    * */
-  Eigen::VectorXd* q_star_ptr = nullptr;
-  /** The initial constrain polyhedron of IRIS
-   * */
-  HPolyhedron* starting_hpolyhedron_ptr = nullptr;
-
-  void set_q_star(const Eigen::Ref<const Eigen::VectorXd>& q_star)
-  {
-    Eigen::VectorXd q_star_copy = q_star;
-    q_star_ptr = &q_star_copy;
-  }
-  Eigen::VectorXd get_q_star()
-  {
-    return *q_star_ptr;
-  }
-
-  void set_starting_hpolyhedron(const HPolyhedron P)
-  {
-    HPolyhedron P_copy = P;
-    starting_hpolyhedron_ptr = &P_copy;
-  }
-  HPolyhedron get_starting_hpolyhedron()
-  {
-    return *starting_hpolyhedron_ptr;
-  }
-
+  std::optional<Eigen::VectorXd> q_star;
 };
 
 /** A variation of the Iris (Iterative Region Inflation by Semidefinite
@@ -208,9 +183,6 @@ IrisInConfigurationSpace for the rational reparametrization
 connected to a SceneGraph in a systems::Diagram.
 @param context is a context of the @p plant. The context must have the positions
 of the plant set to the initialIRIS seed configuration.
-@param q_star is the point from which the stereographic projection is computed
-@param C0 initial limits for HPolyhedron Ct <= d that we will return
-@param d0 initial limits for HPolyhedron Ct <= d  that we will return
 @param options provides additional configuration options.  In particular,
 `options.certify_region_during_generation` vs
 `options.certify_region_after_generation' can have an impact on computation time
@@ -220,7 +192,17 @@ of the plant set to the initialIRIS seed configuration.
 HPolyhedron IrisInRationalConfigurationSpace(
     const multibody::MultibodyPlant<double>& plant,
     const systems::Context<double>& context,
+    const std::optional<HPolyhedron>& starting_hpolyhedron,
     const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
+
+/**
+ * Default version of IrisInRationalConfigurationSpace where the starting HPolyhedron is the joint limits of the plant
+ */
+HPolyhedron IrisInRationalConfigurationSpace(
+    const multibody::MultibodyPlant<double>& plant,
+    const systems::Context<double>& context,
+    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
+
 
 
 }  // namespace optimization
