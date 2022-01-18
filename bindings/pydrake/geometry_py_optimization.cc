@@ -102,7 +102,7 @@ void DefineGeometryOptimization(py::module m) {
         .def("b", &HPolyhedron::b, cls_doc.b.doc)
         .def("ContainedInOtherHPolyhedron", &HPolyhedron::ContainedInOtherHPolyhedron,
              cls_doc.ContainedInOtherHPolyhedron.doc)
-        .def("IrredundantUnion", &HPolyhedron::IrredundantUnion,
+        .def("IrredundantIntersection", &HPolyhedron::IrredundantIntersection,
              cls_doc.IrredundantUnion.doc)
         .def("MaximumVolumeInscribedEllipsoid",
             &HPolyhedron::MaximumVolumeInscribedEllipsoid,
@@ -288,21 +288,22 @@ void DefineGeometryOptimization(py::module m) {
 
   m.def("IrisInRationalConfigurationSpace",
         py::overload_cast<const multibody::MultibodyPlant<double>&,
-          const systems::Context<double>&, const std::optional<HPolyhedron>&,
-          const IrisOptionsRationalSpace&>(
-          &IrisInRationalConfigurationSpace),
+          const systems::Context<double>&,
+          const IrisOptionsRationalSpace&,
+          const std::optional<HPolyhedron>&>(
+                &IrisInRationalConfigurationSpace),
       py::arg("plant"), py::arg("context"),
-      py::arg("starting_polyhedron"),
-      py::arg("options") = IrisOptionsRationalSpace()
+      py::arg("options") = IrisOptionsRationalSpace(),
+      py::arg("starting_polyhedron")
       );
 
-  m.def("IrisInRationalConfigurationSpace",
-        py::overload_cast<const multibody::MultibodyPlant<double>&,
-          const systems::Context<double>&, const IrisOptionsRationalSpace&>(
-          &IrisInRationalConfigurationSpace),
-      py::arg("plant"), py::arg("context"),
-      py::arg("options") = IrisOptionsRationalSpace()
-      );
+//  m.def("IrisInRationalConfigurationSpace",
+//        py::overload_cast<const multibody::MultibodyPlant<double>&,
+//          const systems::Context<double>&, const IrisOptionsRationalSpace&>(
+//                &IrisInRationalConfigurationSpace),
+//      py::arg("plant"), py::arg("context"),
+//      py::arg("options") = IrisOptionsRationalSpace()
+//      );
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,

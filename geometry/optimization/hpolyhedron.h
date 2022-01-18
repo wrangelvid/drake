@@ -59,12 +59,12 @@ class HPolyhedron final : public ConvexSet {
   bool ContainedInOtherHPolyhedron(const HPolyhedron& other) const;
 
 
-  /** Add the irredundant inequalities from @p other to the inequalities from this polytope and return the union.
-   * Note that this function is not symmetric, i.e. this.IrredundantUnion(other) will not give the same result as
-   * other.IrredundantUnion(this)
+  /**
+   * Construct the intersection of two HPolyhedron by adding the rows of inequalities from @p other to this HPolyhedron
+   * if the inequality is not implied by the inequalities from this HPolyhedron.
    * @return
    */
-  HPolyhedron IrredundantUnion(const HPolyhedron& other) const;
+  HPolyhedron IrredundantIntersection(const HPolyhedron& other) const;
 
   /** Solves a semi-definite program to compute the inscribed ellipsoid.
   From Section 8.4.2 in Boyd and Vandenberghe, 2004, we solve

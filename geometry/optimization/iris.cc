@@ -695,11 +695,10 @@ HPolyhedron IrisInConfigurationSpace(const MultibodyPlant<double>& plant,
 }
 
 
-HPolyhedron IrisInRationalConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const std::optional<HPolyhedron>& starting_hpolyhedron,
-    const IrisOptionsRationalSpace& options) {
+HPolyhedron IrisInRationalConfigurationSpace(const multibody::MultibodyPlant<double> &plant,
+                                             const systems::Context<double> &context,
+                                             const IrisOptionsRationalSpace &options,
+                                             const std::optional<HPolyhedron> &starting_hpolyhedron) {
 
   // Check the inputs.
   plant.ValidateContext(context);
@@ -727,7 +726,7 @@ HPolyhedron IrisInRationalConfigurationSpace(
       HPolyhedron P_joint_limits = HPolyhedron::MakeBox(t_lower_limits, t_upper_limits);
       // ensure that our starting HPolyhedron starts within the joint limits
       P_ptr = std::make_unique<HPolyhedron>(
-              starting_hpolyhedron.value().IrredundantUnion(P_joint_limits)
+              starting_hpolyhedron.value().IrredundantIntersection(P_joint_limits)
       );
   }
   else{
@@ -736,7 +735,6 @@ HPolyhedron IrisInRationalConfigurationSpace(
       );
   }
   HPolyhedron P = *P_ptr;
-  DRAKE_DEMAND(P.A().rows() >= 2 * nt);
 
   const double kEpsilonEllipsoid = 1e-5;
   Hyperellipsoid E = Hyperellipsoid::MakeHypersphere(kEpsilonEllipsoid, t_sample);
@@ -885,14 +883,7 @@ HPolyhedron IrisInRationalConfigurationSpace(
   return P;
 }
 
-HPolyhedron IrisInRationalConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const IrisOptionsRationalSpace& options) {
-    std::optional<HPolyhedron> P;
 
-    return IrisInRationalConfigurationSpace(plant, context, P, options);
-}
 
 
 }  // namespace optimization

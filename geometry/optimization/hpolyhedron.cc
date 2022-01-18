@@ -177,7 +177,7 @@ bool HPolyhedron::DoIsBounded() const {
   return result.is_success();
 }
 
-//TODO: need to add tests for this
+//TODO (Alex.Amice): need to add tests for this
 bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
   DRAKE_DEMAND(other.A().cols() == A_.cols());
   const double kInf = std::numeric_limits<double>::infinity();
@@ -194,6 +194,8 @@ bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
       prog.AddLinearCost(-other.A().row(0), 0, x);
 
   for(int i = 0; i < other.A().rows(); i++){
+    // this inequality ensures a bounded objective since the left hand side of the inequality is the
+    // same as the cost function on the next line.
     redundant_constraint_binding.evaluator()->UpdateCoefficients(
         other.A().row(i), Eigen::VectorXd::Constant(1, -kInf),
         other.b().row(i) + Eigen::VectorXd::Ones(1));
@@ -201,7 +203,8 @@ bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
     auto result = solvers::Solve(prog);
 
     // constraints define an empty set or the current inequality of other is not redundant
-    if(!result.is_success()) { return true;}
+    if(result.get_solution_result() == solvers::SolutionResult::kInfeasibleConstraints ||
+    result.get_solution_result() == solvers::SolutionResult::kInfeasible_Or_Unbounded) { return true;}
     if(-result.get_optimal_cost() > other.b()(i)){
       return false;
     }
@@ -209,8 +212,8 @@ bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
   return true;
 }
 
-//TODO: need to add tests for this
-HPolyhedron HPolyhedron::IrredundantUnion(const HPolyhedron &other) const {
+//TODO (Alex.Amice): need to add tests for this
+HPolyhedron HPolyhedron::IrredundantIntersection(const HPolyhedron &other) const {
   DRAKE_DEMAND(other.A().cols() == A_.cols());
   const double kInf = std::numeric_limits<double>::infinity();
 
@@ -238,11 +241,13 @@ HPolyhedron HPolyhedron::IrredundantUnion(const HPolyhedron &other) const {
     redundant_constraint_binding.evaluator()->UpdateCoefficients(
         other.A().row(i), Eigen::VectorXd::Constant(1, -kInf),
         other.b().row(i) + Eigen::VectorXd::Ones(1));
-    program_cost_binding.evaluator()->UpdateCoefficients(-other.A().row(0), 0);
+    program_cost_binding.evaluator()->UpdateCoefficients(-other.A().row(i), 0);
     auto result = solvers::Solve(prog);
 
     // constraints define an empty set or the current inequality of other is not redundant
-    if(!result.is_success() or -result.get_optimal_cost() > other.b()(i)){
+    bool empty_set_condition = result.get_solution_result() == solvers::SolutionResult::kInfeasibleConstraints ||
+    result.get_solution_result() == solvers::SolutionResult::kInfeasible_Or_Unbounded;
+    if(empty_set_condition or -result.get_optimal_cost() > other.b()(i)){
       A.row(num_kept) = other.A().row(i);
       b.row(num_kept) = other.b().row(i);
       num_kept++;

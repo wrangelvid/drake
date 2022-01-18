@@ -182,26 +182,19 @@ IrisInConfigurationSpace for the rational reparametrization
 @param plant describes the kinematics of configuration space.  It must be
 connected to a SceneGraph in a systems::Diagram.
 @param context is a context of the @p plant. The context must have the positions
-of the plant set to the initialIRIS seed configuration.
+of the plant set to the initial IRIS seed configuration.
 @param options provides additional configuration options.  In particular,
 `options.certify_region_during_generation` vs
 `options.certify_region_after_generation' can have an impact on computation time
-
+@param starting_hpolyhedron is an optional argument to constrain the initial iris search. This defaults to the joint
+ limits of the plants, but if there is a reason to constrain it further this option is provided.
 @ingroup geometry_optimization
 */
-HPolyhedron IrisInRationalConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const std::optional<HPolyhedron>& starting_hpolyhedron,
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
+HPolyhedron IrisInRationalConfigurationSpace(const multibody::MultibodyPlant<double> &plant,
+                                             const systems::Context<double> &context,
+                                             const IrisOptionsRationalSpace &options = IrisOptionsRationalSpace(),
+                                             const std::optional<HPolyhedron> &starting_hpolyhedron = std::nullopt);
 
-/**
- * Default version of IrisInRationalConfigurationSpace where the starting HPolyhedron is the joint limits of the plant
- */
-HPolyhedron IrisInRationalConfigurationSpace(
-    const multibody::MultibodyPlant<double>& plant,
-    const systems::Context<double>& context,
-    const IrisOptionsRationalSpace& options = IrisOptionsRationalSpace());
 
 
 

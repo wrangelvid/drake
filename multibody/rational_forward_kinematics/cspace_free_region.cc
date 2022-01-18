@@ -1017,7 +1017,7 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
     const BinarySearchOption& binary_search_option,
     const solvers::SolverOptions& solver_options,
     Eigen::VectorXd* d_final) const {
-  // TODO: This method tries to find the maximum expansion of the polytope. I tried to find the minimal tightening
+  // TODO (amice): This method tries to find the maximum expansion of the polytope. I tried to find the minimal tightening
   // of the polytope. Could try both: If initial region C t <= d_init infeasible then look for d_init-var_epsilon
   // and search until either empty/region is too small and verified. If initial reagion is feasible then try to grow
   // d_init + var_epsilon
