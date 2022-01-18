@@ -104,7 +104,7 @@ void DefineGeometryOptimization(py::module m) {
         .def("ContainedInOtherHPolyhedron", &HPolyhedron::ContainedInOtherHPolyhedron,
              cls_doc.ContainedInOtherHPolyhedron.doc)
         .def("IrredundantIntersection", &HPolyhedron::IrredundantIntersection,
-             cls_doc.IrredundantUnion.doc)
+             cls_doc.IrredundantIntersection.doc)
         .def("MaximumVolumeInscribedEllipsoid",
             &HPolyhedron::MaximumVolumeInscribedEllipsoid,
             cls_doc.MaximumVolumeInscribedEllipsoid.doc)
@@ -295,16 +295,8 @@ void DefineGeometryOptimization(py::module m) {
                 &IrisInRationalConfigurationSpace),
       py::arg("plant"), py::arg("context"),
       py::arg("options") = IrisOptionsRationalSpace(),
-      py::arg("starting_polyhedron")
+      py::arg("starting_polyhedron") = std::nullopt
       );
-
-//  m.def("IrisInRationalConfigurationSpace",
-//        py::overload_cast<const multibody::MultibodyPlant<double>&,
-//          const systems::Context<double>&, const IrisOptionsRationalSpace&>(
-//                &IrisInRationalConfigurationSpace),
-//      py::arg("plant"), py::arg("context"),
-//      py::arg("options") = IrisOptionsRationalSpace()
-//      );
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,
