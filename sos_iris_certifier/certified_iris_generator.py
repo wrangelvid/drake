@@ -118,6 +118,7 @@ class CertifiedIrisRegionGenerator():
         E = Hyperellipsoid(np.eye(self.num_joints) / self._iris_starting_ellipse_vol, point)
         best_volume = E.Volume()
 
+        # THIS IS THE INITIAL POLYTOPE
         P = HPolyhedron.MakeBox(self.t_lower_limits, self.t_upper_limits)
         A = np.vstack((P.A(), np.zeros((self._iris_default_num_faces * len(self.pairs), self.num_joints))))
         b = np.concatenate((P.b(), np.zeros(self._iris_default_num_faces * len(self.pairs))))

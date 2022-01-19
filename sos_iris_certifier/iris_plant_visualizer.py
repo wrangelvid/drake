@@ -4,7 +4,7 @@ from meshcat.servers.zmqserver import start_zmq_server_as_subprocess
 from meshcat import Visualizer
 import meshcat
 from pydrake.all import ConnectMeshcatVisualizer
-from t_space_utils import convert_q_to_t, convert_t_to_q, EvaluatePlanePair
+from t_space_utils import EvaluatePlanePair
 from pydrake.all import InverseKinematics
 from functools import partial
 import mcubes
@@ -35,9 +35,9 @@ class IrisPlantVisualizer:
         # the point around which we construct the stereographic projection
         self.q_star = kwargs.get('q_star', np.zeros(self.num_joints))
         self.q_lower_limits = plant.GetPositionLowerLimits()
-        self.t_lower_limits = convert_q_to_t(self.q_lower_limits, self.q_star)
+        self.t_lower_limits = self.forward_kin.ComputeTValue(self.q_lower_limits,  self.q_star).squeeze()
         self.q_upper_limits = plant.GetPositionUpperLimits()
-        self.t_upper_limits = convert_q_to_t(self.q_upper_limits, self.q_star)
+        self.t_upper_limits = self.forward_kin.ComputeTValue(self.q_upper_limits,  self.q_star).squeeze()
 
 
 
@@ -90,7 +90,7 @@ class IrisPlantVisualizer:
         self.ik = InverseKinematics(plant, self.plant_context)
         self.collision_constraint = self.ik.AddMinimumDistanceConstraint(1e-4, 0.01)
         self.col_func_handle = partial(self.eval_cons, c=self.collision_constraint, tol=0.01)
-        self.col_func_handle_rational = partial(self.eval_cons_rational)
+        self.col_func_handle_rational = self.eval_cons_rational
 
         #plotting planes setup
         x = np.linspace(-1, 1, 3)
@@ -114,7 +114,7 @@ class IrisPlantVisualizer:
 
     def eval_cons_rational(self, *t):
         t = np.array(t)
-        q = convert_t_to_q(np.array(t).reshape(1, -1)).squeeze()
+        q = self.forward_kin.ComputeQValue(t, self.q_star).squeeze()
         return self.col_func_handle(q)
 
     def visualize_collision_constraint(self, N = 50):
@@ -143,7 +143,7 @@ class IrisPlantVisualizer:
     def showres(self,q):
         self.plant.SetPositions(self.plant_context, q)
         col = self.col_func_handle(q)
-        t = convert_q_to_t(np.array(q).reshape(1, -1)).squeeze()
+        t = self.forward_kin.ComputeTValue(q, self.q_star)
         if col:
             self.vis2["t"].set_object(
                 meshcat.geometry.Sphere(0.1), meshcat.geometry.MeshLambertMaterial(color=0xFFB900))
@@ -157,11 +157,11 @@ class IrisPlantVisualizer:
         self.diagram.Publish(self.diagram_context)
 
     def showres_t(self, t):
-        q = convert_t_to_q(t)
+        q = self.forward_kin.ComputeQValue(t, self.q_star)
         self.showres(q)
 
     def show_res_with_planes(self, q):
-        t = convert_q_to_t(q)
+        t = self.forward_kin.ComputeTValue(q, self.q_star)
         self.showres(q)
         if self.region_to_collision_pair_to_plane_dictionary is not None:
             for region, collision_pair_to_plane_dictionary in self.region_to_collision_pair_to_plane_dictionary.items():
@@ -227,7 +227,7 @@ class IrisPlantVisualizer:
 
         for _ in range(runtime):
             # print(idx)
-            q = convert_t_to_q(traj.value(time_points[idx]).reshape(1, -1)).squeeze()
+            q = self.forward_kin.ComputeQValue(time_points[idx], self.q_star).squeeze()
             if self.region_to_collision_pair_to_plane_dictionary is not None:
                 self.show_res_with_planes(q)
             else:
@@ -251,7 +251,7 @@ class IrisPlantVisualizer:
             pt = traj.value(it * traj.end_time() / maxit)
             pt_nxt = traj.value((it + 1) * traj.end_time() / maxit)
 
-            pt_q = convert_t_to_q(pt.reshape(1, -1)).squeeze()
+            pt_q = self.forward_kin.ComputeQValue(pt.reshape(1, -1), self.q_star).squeeze()
 
             mat = meshcat.geometry.MeshLambertMaterial(color=0xFFF812)
             mat.reflectivity = 1.0

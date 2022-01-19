@@ -40,7 +40,23 @@ filegroup(
 ##########################################################
 
 drake_jupyter_py_binary(
-    name = "sos_iris_example",
+    name = "sos_iris_example_python",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sos_iris_certifier:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sos_iris_certifier:certified_iris_generator",
+        "//sos_iris_certifier:iris_plant_visualizer",
+        "//sos_iris_certifier:iris_utils",
+        "//sos_iris_certifier:visualizations_utils",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "sos_iris_fused_iiwa_example",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",
@@ -77,6 +93,21 @@ drake_jupyter_py_binary(
     data = [
         "//manipulation/models/iiwa_description:models",
         "//sos_iris_certifier:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sos_iris_certifier:certified_iris_generator",
+        "//sos_iris_certifier:iris_plant_visualizer",
+        "//sos_iris_certifier:iris_utils",
+        "//sos_iris_certifier:visualizations_utils",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "pinball_rational",
+    add_test_rule = 0,
+    data = [
+        "//sandbox:models",
     ],
     deps = [
         "//bindings/pydrake",
