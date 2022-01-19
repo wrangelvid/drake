@@ -56,7 +56,15 @@ class HPolyhedron final : public ConvexSet {
    * whether every inequality in @p other is redundant when added to this.
    * @return
    */
-  bool ContainedInOtherHPolyhedron(const HPolyhedron other) const;
+  bool ContainedInOtherHPolyhedron(const HPolyhedron& other) const;
+
+
+  /**
+   * Construct the intersection of two HPolyhedron by adding the rows of inequalities from @p other to this HPolyhedron
+   * if the inequality is not implied by the inequalities from this HPolyhedron.
+   * @return
+   */
+  HPolyhedron IrredundantIntersection(const HPolyhedron& other) const;
 
   /** Solves a semi-definite program to compute the inscribed ellipsoid.
   From Section 8.4.2 in Boyd and Vandenberghe, 2004, we solve

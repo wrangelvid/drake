@@ -14,6 +14,7 @@
 #include "drake/geometry/optimization/iris.h"
 #include "drake/geometry/optimization/minkowski_sum.h"
 #include "drake/geometry/optimization/point.h"
+#include "drake/geometry/optimization/polytope_cover.h"
 #include "drake/geometry/optimization/vpolytope.h"
 
 namespace drake {
@@ -100,6 +101,10 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("reference_frame") = std::nullopt, cls_doc.ctor.doc_3args)
         .def("A", &HPolyhedron::A, cls_doc.A.doc)
         .def("b", &HPolyhedron::b, cls_doc.b.doc)
+        .def("ContainedInOtherHPolyhedron", &HPolyhedron::ContainedInOtherHPolyhedron,
+             cls_doc.ContainedInOtherHPolyhedron.doc)
+        .def("IrredundantIntersection", &HPolyhedron::IrredundantIntersection,
+             cls_doc.IrredundantIntersection.doc)
         .def("MaximumVolumeInscribedEllipsoid",
             &HPolyhedron::MaximumVolumeInscribedEllipsoid,
             cls_doc.MaximumVolumeInscribedEllipsoid.doc)
@@ -231,12 +236,67 @@ void DefineGeometryOptimization(py::module m) {
                 self.relative_termination_threshold,
                 self.configuration_space_margin, self.enable_ibex);
       });
+  py::class_<IrisOptionsRationalSpace>(m, "IrisOptionsRationalSpace", doc.IrisOptionsRationalSpace.doc)
+      .def(py::init<>(), doc.IrisOptionsRationalSpace.ctor.doc)
+      .def_readwrite("require_sample_point_is_contained",
+          &IrisOptionsRationalSpace::require_sample_point_is_contained,
+          doc.IrisOptions.require_sample_point_is_contained.doc)
+      .def_readwrite("iteration_limit", &IrisOptionsRationalSpace::iteration_limit,
+          doc.IrisOptions.iteration_limit.doc)
+      .def_readwrite("termination_threshold",
+          &IrisOptionsRationalSpace::termination_threshold,
+          doc.IrisOptions.termination_threshold.doc)
+      .def_readwrite("relative_termination_threshold",
+          &IrisOptionsRationalSpace::relative_termination_threshold,
+          doc.IrisOptions.relative_termination_threshold.doc)
+      .def_readwrite("configuration_space_margin",
+          &IrisOptionsRationalSpace::configuration_space_margin,
+          doc.IrisOptions.configuration_space_margin.doc)
+      .def_readwrite("enable_ibex", &IrisOptionsRationalSpace::enable_ibex,
+          doc.IrisOptions.enable_ibex.doc)
+      .def_readwrite("certify_region_with_sos_during_generation", &IrisOptionsRationalSpace::certify_region_with_sos_during_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_during_generation.doc)
+      .def_readwrite("certify_region_with_sos_after_generation", &IrisOptionsRationalSpace::certify_region_with_sos_after_generation,
+          doc.IrisOptionsRationalSpace.certify_region_with_sos_after_generation.doc)
+      .def_readwrite("q_star", &IrisOptionsRationalSpace::q_star,
+                     doc.IrisOptionsRationalSpace.q_star.doc)
+      .def("__repr__", [](const IrisOptionsRationalSpace& self) {
+        return py::str(
+            "IrisOptionsRationalSpace("
+            "require_sample_point_is_contained={}, "
+            "iteration_limit={}, "
+            "termination_threshold={}, "
+            "relative_termination_threshold={}, "
+            "configuration_space_margin={}, "
+            "enable_ibex={}"
+            "certify_region_with_sos_during_generation={}"
+            "certify_region_with_sos_after_generation={}"
+            ")")
+            .format(self.require_sample_point_is_contained,
+                self.iteration_limit, self.termination_threshold,
+                self.relative_termination_threshold,
+                self.configuration_space_margin, self.enable_ibex,
+                self.certify_region_with_sos_during_generation,
+                self.certify_region_with_sos_after_generation
+                );
+      });
 
   m.def("Iris", &Iris, py::arg("obstacles"), py::arg("sample"),
       py::arg("domain"), py::arg("options") = IrisOptions(), doc.Iris.doc);
 
   m.def("MakeIrisObstacles", &MakeIrisObstacles, py::arg("query_object"),
       py::arg("reference_frame") = std::nullopt, doc.MakeIrisObstacles.doc);
+
+  m.def("IrisInRationalConfigurationSpace",
+        py::overload_cast<const multibody::MultibodyPlant<double>&,
+          const systems::Context<double>&,
+          const IrisOptionsRationalSpace&,
+          const std::optional<HPolyhedron>&>(
+                &IrisInRationalConfigurationSpace),
+      py::arg("plant"), py::arg("context"),
+      py::arg("options") = IrisOptionsRationalSpace(),
+      py::arg("starting_polyhedron") = std::nullopt
+      );
 
   m.def("IrisInConfigurationSpace",
       py::overload_cast<const multibody::MultibodyPlant<double>&,
@@ -422,6 +482,39 @@ void DefineGeometryOptimization(py::module m) {
             py::arg("result"), edge_doc.GetSolutionPhiXu.doc)
         .def("GetSolutionPhiXv", &GraphOfConvexSets::Edge::GetSolutionPhiXv,
             py::arg("result"), edge_doc.GetSolutionPhiXv.doc);
+  }
+
+  // polytope_cover.h
+  {
+    py::class_<AxisAlignedBox>(m, "AxisAlignedBox", doc.AxisAlignedBox.doc)
+        .def(py::init<const Eigen::Ref<const Eigen::VectorXd>&,
+                 const Eigen::Ref<const Eigen::VectorXd>&>(),
+            py::arg("lo"), py::arg("up"), doc.AxisAlignedBox.ctor.doc)
+        .def_static("OuterBox", &AxisAlignedBox::OuterBox, py::arg("C"),
+            py::arg("d"), doc.AxisAlignedBox.OuterBox.doc)
+        .def("Scale", &AxisAlignedBox::Scale, py::arg("factor"),
+            doc.AxisAlignedBox.Scale.doc)
+        .def("lo", &AxisAlignedBox::lo, py_rvp::reference_internal,
+            doc.AxisAlignedBox.lo.doc)
+        .def("up", &AxisAlignedBox::up, py_rvp::reference_internal,
+            doc.AxisAlignedBox.lo.doc);
+
+    py::class_<FindInscribedBox>(
+        m, "FindInscribedBox", doc.FindInscribedBox.doc)
+        .def(py::init<const Eigen::Ref<const Eigen::MatrixXd>&,
+                 const Eigen::Ref<const Eigen::VectorXd>&,
+                 std::vector<AxisAlignedBox>,
+                 const std::optional<AxisAlignedBox>&>(),
+            py::arg("C"), py::arg("d"), py::arg("obstacles"),
+            py::arg("outer_box"), doc.FindInscribedBox.ctor.doc)
+        .def("prog", &FindInscribedBox::prog, py_rvp::reference_internal,
+            doc.FindInscribedBox.prog.doc)
+        .def("mutable_prog", &FindInscribedBox::mutable_prog,
+            py_rvp::reference_internal, doc.FindInscribedBox.mutable_prog.doc)
+        .def("box_lo", &FindInscribedBox::box_lo, py_rvp::reference_internal,
+            doc.FindInscribedBox.box_lo.doc)
+        .def("box_up", &FindInscribedBox::box_up, py_rvp::reference_internal,
+            doc.FindInscribedBox.box_up.doc);
   }
 }
 
