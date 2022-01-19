@@ -186,6 +186,11 @@ bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
   prog.AddLinearConstraint(
         A_, Eigen::VectorXd::Constant(b_.rows(), -kInf),
         b_, x);
+  auto result = solvers::Solve(prog);
+  // this defines an empty set and therefore is contained in any other HPolyhedron
+  if(result.get_solution_result() == solvers::SolutionResult::kInfeasibleConstraints ||
+    result.get_solution_result() == solvers::SolutionResult::kInfeasible_Or_Unbounded) { return true;}
+
   Binding<solvers::LinearConstraint> redundant_constraint_binding = prog.AddLinearConstraint(
       other.A().row(0), Eigen::VectorXd::Constant(1, -kInf), other.b().row(0), x
       );
@@ -198,13 +203,18 @@ bool HPolyhedron::ContainedInOtherHPolyhedron(const HPolyhedron& other) const {
     redundant_constraint_binding.evaluator()->UpdateCoefficients(
         other.A().row(i), Eigen::VectorXd::Constant(1, -kInf),
         other.b().row(i) + Eigen::VectorXd::Ones(1));
-    program_cost_binding.evaluator()->UpdateCoefficients(-other.A().row(0), 0);
-    auto result = solvers::Solve(prog);
+    program_cost_binding.evaluator()->UpdateCoefficients(-other.A().row(i), 0);
+    result = solvers::Solve(prog);
 
-    // constraints define an empty set or the current inequality of other is not redundant
-    if(result.get_solution_result() == solvers::SolutionResult::kInfeasibleConstraints ||
-    result.get_solution_result() == solvers::SolutionResult::kInfeasible_Or_Unbounded) { return true;}
-    if(-result.get_optimal_cost() > other.b()(i)){
+    // constraints define an empty set or the current inequality of other is not redundant. Since we tested
+    // whether this polyhedron is empty earlier, the function would already have exited so this is proof that this
+    // inequality is irredundant and therefore there is no containment
+    bool PolyhedronIsEmpty = result.get_solution_result() == solvers::SolutionResult::kInfeasibleConstraints ||
+    result.get_solution_result() == solvers::SolutionResult::kInfeasible_Or_Unbounded;
+
+    // if -result.get_optimal_cost() > other.b()(i) then the inequality is not redundant and so there is no containment
+    // added a numeric tolerance of 1E-8 but this seems somewhat arbitrary
+    if(PolyhedronIsEmpty or -result.get_optimal_cost() > other.b()(i) + 1E-8){
       return false;
     }
   }
@@ -252,6 +262,55 @@ HPolyhedron HPolyhedron::IrredundantIntersection(const HPolyhedron &other) const
     }
   }
   return HPolyhedron(A.topRows(num_kept), b.topRows(num_kept));
+}
+
+HPolyhedron HPolyhedron::ReduceInequalities() const {
+  const double kInf = std::numeric_limits<double>::infinity();
+  const int num_inequalities = A_.rows();
+  const int num_vars = A_.cols();
+
+  int num_kept = num_inequalities;
+  std::unordered_set<int> kept_indices;
+  for (int i = 0; i < num_inequalities; i++) {
+      kept_indices.emplace(i);
+    }
+
+  for (int excluded_index = 0; excluded_index < num_inequalities;
+       excluded_index++) {
+    solvers::MathematicalProgram prog;
+    solvers::VectorXDecisionVariable x =
+        prog.NewContinuousVariables(num_vars, "x");
+    std::unordered_set<int> cur_kept_indices = kept_indices;
+    cur_kept_indices.erase(excluded_index);
+
+    // constraint c^Tx <= d+1
+    prog.AddLinearConstraint(
+        A_.row(excluded_index), Eigen::VectorXd::Constant(1, -kInf),
+        b_.row(excluded_index) + Eigen::VectorXd::Ones(1), x);
+
+    // constraint Ax <= b
+    for (const int i : cur_kept_indices) {
+      prog.AddLinearConstraint(A_.row(i), Eigen::VectorXd::Constant(1, -kInf),
+                               b_.row(i), x);
+    }
+
+    prog.AddLinearCost(-A_.row(excluded_index), 0, x);
+
+    auto result = solvers::Solve(prog);
+
+    // the current inequality is redundant
+    if (-result.get_optimal_cost() <= b_(excluded_index)) {
+      kept_indices.erase(excluded_index);
+      num_kept--;
+    }
+  }
+  Eigen::MatrixXd A_new(num_kept, num_vars);
+  Eigen::VectorXd b_new(num_kept);
+  for(const int ind : kept_indices){
+    A_new.row(ind) = A_.row(ind);
+    b_new.row(ind) = b_.row(ind);
+  }
+  return HPolyhedron(A_new, b_new);
 }
 
 bool HPolyhedron::DoPointInSet(const Eigen::Ref<const VectorXd>& x,
