@@ -659,8 +659,7 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
                        .count()) /
                    1000
             << "s\n";
-  prog->AddMaximizeLogDeterminantCost(
-      P.cast<symbolic::Expression>());
+  prog->AddMaximizeLogDeterminantCost(P.cast<symbolic::Expression>());
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, 1);
   const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
@@ -743,7 +742,10 @@ TEST_F(IiwaCspaceTest, ConstructLagrangianAndPolytopeProgram) {
   auto prog_polytope = dut.ConstructPolytopeProgram(
       alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
       verified_gram_vars, separating_plane_vars, t_minus_t_lower,
-      t_upper_minus_t, P_sol, q_sol, {}, &margin);
+      t_upper_minus_t, {});
+  margin = prog_polytope->NewContinuousVariables(C_var.rows(), "margin");
+  AddOuterPolytope(prog_polytope.get(), P_sol, q_sol, C_var, d_var, margin);
+  prog_polytope->AddBoundingBoxConstraint(0, kInf, margin);
   clock_finish = std::chrono::system_clock::now();
   std::cout << "ConstructPolytopeProgram takes "
             << static_cast<float>(
@@ -884,13 +886,21 @@ TEST_F(IiwaCspaceTest, CspacePolytopeBinarySearch) {
   d(1) = 3 * d(1);
 
   CspaceFreeRegion::BinarySearchOption binary_search_option{
-      .epsilon_max = 1, .epsilon_min = 0.1, .epsilon_tol = 0.1};
+      .epsilon_max = 1, .epsilon_min = 0.1, .max_iters = 4, .search_d = false};
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, true);
   Eigen::VectorXd d_final;
   dut.CspacePolytopeBinarySearch(q_star, filtered_collision_pairs, C, d,
                                  binary_search_option, solver_options,
                                  &d_final);
+
+  // Now do binary search but also look for d.
+  binary_search_option.search_d = true;
+  binary_search_option.max_iters = 2;
+  Eigen::VectorXd d_final_search_d;
+  dut.CspacePolytopeBinarySearch(q_star, filtered_collision_pairs, C, d,
+                                 binary_search_option, solver_options,
+                                 &d_final_search_d);
 }
 
 GTEST_TEST(CalcPolynomialFromGram, Test1) {
@@ -1004,8 +1014,7 @@ GTEST_TEST(AddInscribedEllipsoid, Test1) {
   const Eigen::Vector2d t_upper(1, 2);
   AddInscribedEllipsoid(&prog, Eigen::MatrixXd::Zero(0, 2), Eigen::VectorXd(0),
                         t_lower, t_upper, P, q);
-  prog.AddMaximizeLogDeterminantCost(
-      P.cast<symbolic::Expression>());
+  prog.AddMaximizeLogDeterminantCost(P.cast<symbolic::Expression>());
   const auto result = solvers::Solve(prog);
   const double tol = 1E-7;
   EXPECT_TRUE(
@@ -1033,8 +1042,7 @@ GTEST_TEST(AddInscribedEllipsoid, Test2) {
   // clang-format on
   const Eigen::Vector4d d(2, 2, 0, 0);
   AddInscribedEllipsoid(&prog, C, d, t_lower, t_upper, P, q);
-  prog.AddMaximizeLogDeterminantCost(
-      P.cast<symbolic::Expression>());
+  prog.AddMaximizeLogDeterminantCost(P.cast<symbolic::Expression>());
   const auto result = solvers::Solve(prog);
   const double tol = 1E-7;
   EXPECT_TRUE(
@@ -1200,6 +1208,26 @@ GTEST_TEST(FindRedundantInequalities, Test) {
   EXPECT_EQ(C_redundant_indices, std::unordered_set<int>({0, 1, 2, 3}));
   EXPECT_EQ(t_lower_redundant_indices, std::unordered_set<int>({0, 1}));
   EXPECT_EQ(t_upper_redundant_indices, std::unordered_set<int>({0, 1}));
+}
+
+GTEST_TEST(FindEpsilonLower, Test) {
+  const Eigen::Vector2d t_lower(-1, -1);
+  const Eigen::Vector2d t_upper(1, 1);
+  // C*t<=d is |x| + |y| <= 3
+  Eigen::Matrix<double, 4, 2> C;
+  // clang-format off
+  C << 1, 1,
+       1, -1,
+       -1, 1,
+       -1, -1;
+  // clang-format on
+  Eigen::Vector4d d(3, 3, 3, 3);
+  const double tol{1E-6};
+  EXPECT_NEAR(FindEpsilonLower(t_lower, t_upper, C, d), -3, tol);
+
+  // C*t<=d is |x-2| + |y-2|<=3
+  d << 7, 3, 3, -1;
+  EXPECT_NEAR(FindEpsilonLower(t_lower, t_upper, C, d), -1, tol);
 }
 
 }  // namespace multibody
