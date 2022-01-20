@@ -378,7 +378,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   *verified_polynomial = polytope_on_one_side_rational.numerator();
   for (int i = 0; i < d_minus_Ct.rows(); ++i) {
     (*lagrangian_polytope)(i) =
-        prog->NewNonnegativePolynomial(monomial_basis,
+        prog->NewSosPolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
             .first;
     *verified_polynomial -= (*lagrangian_polytope)(i)*d_minus_Ct(i);
@@ -386,7 +386,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   for (int i = 0; i < t_minus_t_lower.rows(); ++i) {
     if (t_lower_needs_lagrangian[i]) {
       (*lagrangian_lower)(i) =
-          prog->NewNonnegativePolynomial(monomial_basis,
+          prog->NewSosPolynomial(monomial_basis,
                                          verification_option.lagrangian_type)
               .first;
       *verified_polynomial -= (*lagrangian_lower)(i)*t_minus_t_lower(i);
@@ -397,7 +397,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   for (int i = 0; i < t_upper_minus_t.rows(); ++i) {
     if (t_upper_needs_lagrangian[i]) {
       (*lagrangian_upper)(i) =
-          prog->NewNonnegativePolynomial(monomial_basis,
+          prog->NewSosPolynomial(monomial_basis,
                                          verification_option.lagrangian_type)
               .first;
       *verified_polynomial -= (*lagrangian_upper)(i)*t_upper_minus_t(i);
@@ -407,7 +407,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   }
 
   const symbolic::Polynomial verified_polynomial_expected =
-      prog->NewNonnegativePolynomial(monomial_basis,
+      prog->NewSosPolynomial(monomial_basis,
                                      verification_option.link_polynomial_type)
           .first;
   const symbolic::Polynomial poly_diff{*verified_polynomial -
