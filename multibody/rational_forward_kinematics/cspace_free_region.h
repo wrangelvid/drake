@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -293,6 +294,11 @@ class CspaceFreeRegion {
    * GenerateTuplesForBilinearAlternation.
    * @param t_lower The lower bounds of t computed from joint limits.
    * @param t_upper The upper bounds of t computed from joint limits.
+   * @param redundant_tighten. We aggregate the constraint {C*t<=d, t_lower <= t
+   * <= t_upper} as C̅t ≤ d̅. A row of C̅t ≤ d̅is regarded as redundant, if the C̅ᵢt
+   * ≤ d̅ᵢ − δ is implied by the rest of the constraint, where
+   * δ=redundant_tighten. If redundant_tighten=std::nullopt, then we don't try
+   * to identify the redundant constraints.
    * @param[out] P The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
    * 1}. Set P=nullptr if you don't want the inscribed ellipsoid.
    * @param[out] q The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
@@ -308,8 +314,8 @@ class CspaceFreeRegion {
       const VectorX<symbolic::Variable>& separating_plane_vars,
       const Eigen::Ref<const Eigen::VectorXd>& t_lower,
       const Eigen::Ref<const Eigen::VectorXd>& t_upper,
-      const VerificationOption& option, MatrixX<symbolic::Variable>* P,
-      VectorX<symbolic::Variable>* q) const;
+      const VerificationOption& option, std::optional<double> redundant_tighten,
+      MatrixX<symbolic::Variable>* P, VectorX<symbolic::Variable>* q) const;
 
   /**
    * Given lagrangian polynomials, construct an optimization program to search
@@ -379,6 +385,9 @@ class CspaceFreeRegion {
     double lagrangian_backoff_scale{0.};
     double polytope_backoff_scale{0.};
     int verbose{true};
+    // How much tighten we use to determine if a row in {C*t<=d, t_lower <= t <=
+    // t_upper} is redundant.
+    std::optional<double> redundant_tighten{std::nullopt};
   };
 
   /**
@@ -594,5 +603,17 @@ std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     const systems::Diagram<double>& diagram,
     const MultibodyPlant<double>* plant,
     const geometry::SceneGraph<double>* scene_graph);
+
+/**
+ * Find the redundant constraint in {C*t<=d, t_lower<=t<=t_upper}. We regard a
+ * constraint aᵀt ≤ b being redundant if its tightened version aᵀt≤ b-tighten is
+ * implied by the other (untightened) constraints.
+ */
+void FindRedundantInequalities(
+    const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
+    const Eigen::VectorXd& t_lower, const Eigen::VectorXd& t_upper,
+    double tighten, std::unordered_set<int>* C_redundant_indices,
+    std::unordered_set<int>* t_lower_redundant_indices,
+    std::unordered_set<int>* t_upper_redundant_indices);
 }  // namespace multibody
 }  // namespace drake
