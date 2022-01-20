@@ -277,8 +277,13 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
       .def("GenerateLinkOnOneSideOfPlaneRationals",
           &CspaceFreeRegion::GenerateLinkOnOneSideOfPlaneRationals,
           py::arg("q_star"), py::arg("filtered_collision_pairs"),
-          doc.CspaceFreeRegion.GenerateLinkOnOneSideOfPlaneRationals.doc);
-
+          doc.CspaceFreeRegion.GenerateLinkOnOneSideOfPlaneRationals.doc)
+      .def_property_readonly("rational_forward_kinematics", &CspaceFreeRegion::rational_forward_kinematics,
+           doc.CspaceFreeRegion.rational_forward_kinematics.doc)
+      .def_property_readonly("plane_order", &CspaceFreeRegion::plane_order,
+           doc.CspaceFreeRegion.plane_order.doc)
+      .def_property_readonly("cspace_region_type", &CspaceFreeRegion::cspace_region_type,
+           doc.CspaceFreeRegion.cspace_region_type.doc);
   // CspacePolytopeTuple
   py::class_<CspaceFreeRegion::CspacePolytopeTuple>(cspace_cls,
       "CspacePolytopeTuple", doc.CspaceFreeRegion.CspacePolytopeTuple.doc)

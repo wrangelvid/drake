@@ -140,12 +140,6 @@ class CspaceFreeRegion {
                    SeparatingPlaneOrder plane_order,
                    CspaceRegionType cspace_region_type);
 
-  const std::unordered_map<SortedPair<ConvexGeometry::Id>,
-                           const SeparatingPlane*>&
-  map_polytopes_to_separating_planes() const {
-    return map_polytopes_to_separating_planes_;
-  }
-
   /**
    * Generate all the rational functions in the form aᵀx + b -1 or -1-aᵀx-b
    * whose non-negativity implies that the separating plane aᵀx + b =0 separates
@@ -443,6 +437,20 @@ class CspaceFreeRegion {
   const std::map<multibody::BodyIndex, std::vector<ConvexPolytope>>&
   polytope_geometries() const {
     return polytope_geometries_;
+  }
+
+  const std::unordered_map<SortedPair<ConvexGeometry::Id>,
+                           const SeparatingPlane*>&
+  map_polytopes_to_separating_planes() const {
+    return map_polytopes_to_separating_planes_;
+  }
+
+  const SeparatingPlaneOrder& plane_order() const {
+    return plane_order_;
+  }
+
+  const CspaceRegionType& cspace_region_type() const {
+    return cspace_region_type_;
   }
 
  private:
