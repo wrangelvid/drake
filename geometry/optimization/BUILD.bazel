@@ -14,9 +14,11 @@ drake_cc_package_library(
     name = "optimization",
     visibility = ["//visibility:public"],
     deps = [
+        ":bspline_graph_of_convex_sets",
         ":convex_set",
         ":graph_of_convex_sets",
         ":iris",
+        ":polytope_cover",
     ],
 )
 
@@ -75,6 +77,17 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "polytope_cover",
+    srcs = ["polytope_cover.cc"],
+    hdrs = ["polytope_cover.h"],
+    deps = [
+        "//math:gray_code",
+        "//solvers:mathematical_program",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_library(
     name = "test_utilities",
     testonly = 1,
     srcs = ["test_utilities.cc"],
@@ -83,6 +96,18 @@ drake_cc_library(
         ":convex_set",
         "//geometry:scene_graph",
         "//solvers:mathematical_program",
+    ],
+)
+
+drake_cc_library(
+    name = "bspline_graph_of_convex_sets",
+    srcs = ["bspline_graph_of_convex_sets.cc"],
+    hdrs = ["bspline_graph_of_convex_sets.h"],
+    deps = [
+        ":convex_set",
+        ":graph_of_convex_sets",
+        "//common:symbolic",
+        "//common/trajectories:bspline_trajectory",
     ],
 )
 
@@ -109,6 +134,17 @@ drake_cc_googletest(
         ":graph_of_convex_sets",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_googletest(
+    name = "bspline_graph_of_convex_sets_test",
+    # TODO(avalenzu): Remove this once IPOPT flakiness is resolved. See note in
+    # bspline_graph_of_convex_sets.cc.
+    flaky = True,
+    deps = [
+        ":bspline_graph_of_convex_sets",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 
@@ -167,6 +203,14 @@ drake_cc_googletest(
         ":test_utilities",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_googletest(
+    name = "polytope_cover_test",
+    deps = [
+        ":polytope_cover",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 

@@ -26,7 +26,7 @@ namespace symbolic {
  * p1(x) / q1(x) + p2(x) / q2(x) + ... + pn(x) / qn(x). This class's explicit
  * structure facilitates this decomposition.
  */
-class RationalFunction {
+class RationalFunction  {
  public:
   /** Constructs a zero rational function 0 / 1. */
   RationalFunction();
@@ -58,6 +58,14 @@ class RationalFunction {
    * @param c The numerator of the rational function.
    */
   explicit RationalFunction(double c);
+
+  /// Evaluates this polynomial under a given environment @p env.
+  ///
+  /// @throws std::exception if there is a variable in this polynomial whose
+  /// assignment is not provided by @p env.
+  double Evaluate(const Environment& env) const;
+
+
 
   ~RationalFunction() = default;
 
@@ -109,12 +117,19 @@ class RationalFunction {
 
   friend std::ostream& operator<<(std::ostream&, const RationalFunction& f);
 
+  /// Returns an equivalent symbolic expression of this polynomial.
+  Expression ToExpression() const;
+
+  /// Set Indeterminates of the numerator and denominator polynomials
+  void SetIndeterminates(const Variables& new_indeterminates);
+
  private:
   // Throws std::exception if an indeterminate of the denominator (numerator,
   // respectively) is a decision variable of the numerator (denominator).
   void CheckIndeterminates() const;
   Polynomial numerator_;
   Polynomial denominator_;
+
 };
 
 RationalFunction operator+(RationalFunction f1, const RationalFunction& f2);

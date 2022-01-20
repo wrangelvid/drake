@@ -19,6 +19,7 @@
 # (Possible) CMake build artifacts
 /build/
 /cmake-build-*/
+/CMakeFiles
 
 # Bazel build artifacts (symlinks)
 /bazel-*
