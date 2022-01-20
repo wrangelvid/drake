@@ -30,7 +30,9 @@ filegroup(
         "planar_iiwa_dense_collision_welded_gripper.yaml",
         "planar_iiwa_simple_collision_welded_gripper.yaml",
         "schunk_wsg_50_welded_fingers.sdf",
+        "schunk_wsg_50_block.sdf",
         "shelves.sdf",
+        "assets/bimanual_iiwa.yaml"
     ],
     visibility = ["//visibility:public"],
 )
@@ -88,6 +90,22 @@ drake_jupyter_py_binary(
 
 drake_jupyter_py_binary(
     name = "iris_rational_cspace_test",
+    add_test_rule = 0,
+    data = [
+        "//manipulation/models/iiwa_description:models",
+        "//sos_iris_certifier:models",
+    ],
+    deps = [
+        "//bindings/pydrake",
+        "//sos_iris_certifier:certified_iris_generator",
+        "//sos_iris_certifier:iris_plant_visualizer",
+        "//sos_iris_certifier:iris_utils",
+        "//sos_iris_certifier:visualizations_utils",
+    ],
+)
+
+drake_jupyter_py_binary(
+    name = "bimanual_rational",
     add_test_rule = 0,
     data = [
         "//manipulation/models/iiwa_description:models",

@@ -304,15 +304,15 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
     mesh_triangles = []
     
     count = 0
-    print('start')
-    print(len(facets))
+    #print('start')
+    #print(len(facets))
     for idx, facet in enumerate(facets):
         tri = project_and_triangulate(vertices[facet])
         verts = vertices[facet]
         idxs = tri+count
-        print('it:', idx)
-        print(len(verts))
-        print(len(idxs))
+    #    print('it:', idx)
+    #   print(len(verts))
+    #    print(len(idxs))
         mesh_vertices.append(verts)
         mesh_triangles.append(idxs)
 
