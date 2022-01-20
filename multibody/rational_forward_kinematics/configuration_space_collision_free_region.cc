@@ -1017,7 +1017,7 @@ void ConfigurationSpaceCollisionFreeRegion::
       }
     }
     const drake::symbolic::Polynomial verified_polynomial_expected =
-        prog->NewNonnegativePolynomial(
+        prog->NewSosPolynomial(
             verified_polynomial_gram,
             bilinear_alternation_tuples[k].lagrangian_monomial_basis,
             nonnegative_polynomial_type);
@@ -1594,11 +1594,11 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
       polytope_on_one_side_rational.numerator();
   for (int i = 0; i < t_minus_t_lower.size(); ++i) {
     const auto l_lower =
-        prog->NewNonnegativePolynomial(monomial_basis,
+        prog->NewSosPolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
             .first;
     const auto l_upper =
-        prog->NewNonnegativePolynomial(monomial_basis,
+        prog->NewSosPolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
             .first;
     verified_polynomial -= l_lower * t_minus_t_lower(i);
@@ -1607,7 +1607,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   // Replace the following lines with prog->AddSosConstraint when we resolve
   // the speed issue.
   const drake::symbolic::Polynomial verified_polynomial_expected =
-      prog->NewNonnegativePolynomial(monomial_basis,
+      prog->NewSosPolynomial(monomial_basis,
                                      verification_option.link_polynomial_type)
           .first;
   const drake::symbolic::Polynomial poly_diff{verified_polynomial -
@@ -1628,13 +1628,13 @@ AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
       polytope_on_one_side_rational.numerator();
   VectorX<symbolic::Polynomial> lagrangian(d_minus_Ct.rows());
   for (int i = 0; i < d_minus_Ct.rows(); ++i) {
-    lagrangian(i) = prog->NewNonnegativePolynomial(
+    lagrangian(i) = prog->NewSosPolynomial(
                             monomial_basis, verification_option.lagrangian_type)
                         .first;
     verified_polynomial -= lagrangian(i) * d_minus_Ct(i);
   }
   const drake::symbolic::Polynomial verified_polynomial_expected =
-      prog->NewNonnegativePolynomial(monomial_basis,
+      prog->NewSosPolynomial(monomial_basis,
                                      verification_option.link_polynomial_type)
           .first;
   const symbolic::Polynomial poly_diff{verified_polynomial -
