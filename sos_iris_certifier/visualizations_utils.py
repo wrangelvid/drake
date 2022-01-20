@@ -1,11 +1,13 @@
 import numpy as np
+from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 import meshcat
-from pydrake.all import (MathematicalProgram, Variable, HPolyhedron, le, SnoptSolver) 
+from pydrake.all import (MathematicalProgram, Variable, HPolyhedron, le, SnoptSolver, Solve) 
 from functools import partial
 import mcubes
 from pydrake.all import RotationMatrix, RigidTransform
 import colorsys
+import cdd
 import itertools
 from fractions import Fraction
 from t_space_utils import convert_t_to_q, convert_q_to_t
@@ -179,7 +181,7 @@ def get_AABB_limits(hpoly, dim = 3):
         max_limits.append(-result.get_optimal_cost() + 0.01)
     return max_limits, min_limits
 
-def plot_3d_poly(region, resolution, vis, name, mat = None, verbose = False):
+def plot_3d_poly_marchingcubes(region, resolution, vis, name, mat = None, verbose = False):
     
     def inpolycheck(q0,q1,q2, A, b):
         q = np.array([q0, q1, q2])
@@ -204,6 +206,118 @@ def plot_3d_poly(region, resolution, vis, name, mat = None, verbose = False):
     vis[name].set_object(
             meshcat.geometry.TriangularMeshGeometry(vertices, triangles),
             mat)
+
+def plot_3d_poly(region, vis, name, mat = None, verbose = False):
+
+    def prune_halfspaces(C, d):
+        num_inequalities = C.shape[0]
+        num_vars = C.shape[1]
+        redundant_idx = []
+        
+        for excluded_index in range(num_inequalities):
+        
+            #build optimization problem
+            v = C[excluded_index, :]
+            w = d[excluded_index]
+            A = np.delete(C, excluded_index, 0)
+            b = np.delete(d, excluded_index)
+            prog = MathematicalProgram()
+            x = prog.NewContinuousVariables(num_vars)
+            prog.AddCost(- v@x)
+            prog.AddConstraint(le(A@x, b))
+            prog.AddConstraint(v@x <= w+1)
+            result = Solve(prog)
+            if result.is_success():
+                val = result.get_optimal_cost()
+                if -val <= d[excluded_index]:
+                    redundant_idx.append(excluded_index)
+            else:
+                print('Solve failed. Cannot determine whether constraint redundant.')
+            C_simp = np.delete(C, np.array(redundant_idx), 0)
+            d_simp = np.delete(d, np.array(redundant_idx))
+            
+        return C_simp, d_simp, redundant_idx
+
+    # First, prune region
+    A_new ,b_new, redundant_rows = prune_halfspaces(region.A(), region.b())
+    region = HPolyhedron(A_new, b_new)
+
+    def project_and_triangulate(pts):
+        n = np.cross(pts[0,:]-pts[1,:],pts[0,:]-pts[2,:])
+        n = n / np.linalg.norm(n)
+        if not np.abs(n[2]) < 1e-3:  # normal vector not in the XY-plane
+            pts_prj = pts[:,:2]
+        else:
+            if np.abs(n[0]) < 1e-3:  # normal vector not in the Y-direction
+                pts_prj = pts[:,[0,2]]
+            else:
+                pts_prj = pts[:,1:3]
+        tri = Delaunay(pts_prj)
+        return tri.simplices
+
+    # Find feasible point in region
+    prog = MathematicalProgram()
+    x = prog.NewContinuousVariables(3)
+    prog.AddConstraint(le(region.A()@x, region.b()))
+    result = Solve(prog)
+    if result.is_success():
+        x0 = result.GetSolution()
+    else:
+        print("Solve failed. No feasible point found in region.")
+
+    A = region.A()
+    b = region.b() - A@x0
+
+    # Ax <= b must be in form [b -A]
+    b_minusA = np.concatenate((b.reshape(-1,1),-A),axis=1)
+
+    matrix = cdd.Matrix(b_minusA)
+    matrix.rep_type = cdd.RepType.INEQUALITY
+    poly = cdd.Polyhedron(matrix)
+    # Get vrep
+    gen = poly.get_generators()
+
+    # [t vertices]
+    t_v = np.array(gen)
+    vertices = t_v[:,1:] + x0  # vertices need to be moved back
+
+    # only keep nonempty facets
+    facets_with_duplicates = [np.array(list(facet)) for facet in poly.get_input_incidence() if list(facet)]
+
+    # if facet is subset of any other facet, remove
+    remove_idxs = []
+    for idx, facet in enumerate(facets_with_duplicates):
+        for other_idx, other_facet in enumerate(facets_with_duplicates):
+            if (not (idx == other_idx)) and set(facet).issubset(set(other_facet)):
+                remove_idxs.append(idx)
+    if remove_idxs:  # if list not empty 
+        facets = list(np.delete(np.array(facets_with_duplicates), np.array(remove_idxs)))
+    else:
+        facets = facets_with_duplicates
+
+    mesh_vertices = []
+    mesh_triangles = []
+    
+    count = 0
+    for idx, facet in enumerate(facets):
+        tri = project_and_triangulate(vertices[facet])
+
+        mesh_vertices.append(vertices[facet])
+        mesh_triangles.append(tri+count)
+        
+        count += vertices[facet].shape[0]
+
+    mesh_vertices = np.concatenate(mesh_vertices, 0)
+    mesh_triangles = np.concatenate(mesh_triangles, 0)
+
+    if mat is None:
+        mat = meshcat.geometry.MeshLambertMaterial(color=0x000000 , wireframe=False)
+        mat.opacity = 0.3
+    
+    vis[name].set_object(
+                meshcat.geometry.TriangularMeshGeometry(mesh_vertices, mesh_triangles),
+                mat)
+    
 
 def plot_point(loc, radius, mat, vis, marker_id):
     vis['markers'][marker_id].set_object(
@@ -237,13 +351,17 @@ def plot_regions(vis, regions, ellipses = None, region_suffix=''):
     colors = n_colors(len(regions))
     for i, region in enumerate(regions):
         c = colors[i]
-        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=True)
-        mat.opacity = 0.5
+        mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=False)
+        mat.opacity = 1.
         plot_3d_poly(region=region,
-                           resolution=30,
                            vis=vis['iris']['regions'+region_suffix],
                            name=str(i),
                            mat=mat)
+        # plot_3d_poly_marchingcubes(region=region,
+        #                    resolution=30,
+        #                    vis=vis['iris']['regions'+region_suffix],
+        #                    name=str(i),
+        #                    mat=mat)
         if ellipses is not None:
             C = ellipses[i].A()  # [:, (0,2,1)]
             d = ellipses[i].center()  # [[0,2,1]]

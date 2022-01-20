@@ -139,6 +139,13 @@ class IrisPlantVisualizer:
                         meshcat.geometry.Sphere(0.05), meshcat.geometry.MeshLambertMaterial(color=0x0FB900))
             self.vis2['iris']['seedpoints']["seedpoint"+str(i)].set_transform(
                     meshcat.transformations.translation_matrix(seed_points[i,:]))
+            
+    def plot_vertices(vertices):
+    for i in range(vertices.shape[0]):
+        visualizer.vis2['iris']['vertices']["vertex"+str(i)].set_object(
+                    meshcat.geometry.Sphere(0.05), meshcat.geometry.MeshLambertMaterial(color=0xF9FF33))
+        visualizer.vis2['iris']['vertices']["vertex"+str(i)].set_transform(
+                meshcat.transformations.translation_matrix(vertices[i,:]))
 
     def showres(self,q):
         self.plant.SetPositions(self.plant_context, q)
