@@ -12,6 +12,7 @@ import visualizations_utils as viz_utils
 from pydrake.all import RationalForwardKinematics, GeometrySet
 import pydrake.symbolic as sym
 import iris_utils
+from IPython.display import display
 
 class IrisPlantVisualizer:
     def __init__(self, plant, builder, scene_graph, **kwargs):
@@ -109,6 +110,10 @@ class IrisPlantVisualizer:
         #region -> (collision -> plane dictionary)
         self.region_to_collision_pair_to_plane_dictionary = None
 
+    def jupyter_cell(self,):
+        display(self.vis.jupyter_cell())
+        display(self.vis2.jupyter_cell())
+
     def eval_cons(self, q, c, tol):
         return 1 - 1 * float(c.evaluator().CheckSatisfied(q, tol))
 
@@ -130,8 +135,8 @@ class IrisPlantVisualizer:
             meshcat.geometry.TriangularMeshGeometry(vertices, triangles),
             meshcat.geometry.MeshLambertMaterial(color=0xff0000, wireframe=True))
 
-    def plot_regions(self, regions, ellipses = None, region_suffix = ''):
-        viz_utils.plot_regions(self.vis2, regions, ellipses, region_suffix)
+    def plot_regions(self, regions, ellipses = None, region_suffix = '', opacity = 0.5):
+        viz_utils.plot_regions(self.vis2, regions, ellipses, region_suffix, opacity)
 
     def plot_seedpoints(self, seed_points):
         for i in range(seed_points.shape[0]):

@@ -233,8 +233,13 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
                     redundant_idx.append(excluded_index)
             else:
                 print('Solve failed. Cannot determine whether constraint redundant.')
-            C_simp = np.delete(C, np.array(redundant_idx), 0)
-            d_simp = np.delete(d, np.array(redundant_idx))
+            if len(redundant_idx):
+                #print(redundant_idx)
+                C_simp = np.delete(C, np.array(redundant_idx), 0)
+                d_simp = np.delete(d, np.array(redundant_idx))
+            else:
+                C_simp = C
+                d_simp = d
             
         return C_simp, d_simp, redundant_idx
 
@@ -347,12 +352,12 @@ def get_rotation_matrix(axis, theta):
     return R
 
 
-def plot_regions(vis, regions, ellipses = None, region_suffix=''):
+def plot_regions(vis, regions, ellipses = None, region_suffix='', opacity = 0.5):
     colors = n_colors(len(regions))
     for i, region in enumerate(regions):
         c = colors[i]
         mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=False)
-        mat.opacity = 1.
+        mat.opacity = opacity
         plot_3d_poly(region=region,
                            vis=vis['iris']['regions'+region_suffix],
                            name=str(i),
