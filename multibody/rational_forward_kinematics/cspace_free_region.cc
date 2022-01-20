@@ -9,6 +9,7 @@
 #include "drake/geometry/optimization/vpolytope.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
+#include "drake/solvers/mosek_solver.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -364,8 +365,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
     const VectorX<symbolic::Polynomial>& t_minus_t_lower,
     const VectorX<symbolic::Polynomial>& t_upper_minus_t,
     const VectorX<symbolic::Monomial>& monomial_basis,
-    // TODO: should we enforce that this basis be sufficient to express the polynomials in
-    // polytope_on_one_side_rational
     const VerificationOption& verification_option,
     const std::vector<bool>& t_lower_needs_lagrangian,
     const std::vector<bool>& t_upper_needs_lagrangian,
@@ -378,7 +377,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   lagrangian_upper->resize(t_upper_minus_t.rows());
   *verified_polynomial = polytope_on_one_side_rational.numerator();
   for (int i = 0; i < d_minus_Ct.rows(); ++i) {
-    // TODO(amice): only include the lagranians from the non-redundant inequalities of the polytope. Check this condition in here or pass argument like for the lower and upper?
     (*lagrangian_polytope)(i) =
         prog->NewNonnegativePolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
@@ -386,8 +384,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
     *verified_polynomial -= (*lagrangian_polytope)(i)*d_minus_Ct(i);
   }
   for (int i = 0; i < t_minus_t_lower.rows(); ++i) {
-    // TODO: Should we not still add the multiplier here and just set it to 0 if its not needed. Because when we adjust
-    // the regions in the bilinear alternation, it may become the case that t-t_lower>= 0 and t_upper-t <=0 becomes relevant again
     if (t_lower_needs_lagrangian[i]) {
       (*lagrangian_lower)(i) =
           prog->NewNonnegativePolynomial(monomial_basis,
@@ -422,7 +418,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
 }
 }  // namespace
 
-// TODO: how is this different from the ContructLagranianProblem method?
 CspaceFreeRegion::CspacePolytopeProgramReturn
 CspaceFreeRegion::ConstructProgramForCspacePolytope(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
@@ -850,9 +845,16 @@ namespace {
 // @param cost_val is the optimal cost of the optimization program (which
 // minimizes `linear_cost`).
 solvers::MathematicalProgramResult BackoffProgram(
-    solvers::MathematicalProgram* prog,
-    const solvers::Binding<solvers::LinearCost>& linear_cost, double cost_val,
-    double backoff_scale, const solvers::SolverOptions& solver_options) {
+    solvers::MathematicalProgram* prog, double cost_val, double backoff_scale,
+    const solvers::SolverOptions& solver_options) {
+  // The program has no quadratic cost.
+  DRAKE_DEMAND(prog->quadratic_costs().empty());
+  // For the moment, assume the program has only one linear cost.
+  if (prog->linear_costs().size() != 1) {
+    drake::log()->error(
+        "Currently only support program with exactly one linear cost");
+  }
+  const auto linear_cost = prog->linear_costs()[0];
   prog->RemoveCost(linear_cost);
   if (backoff_scale <= 0) {
     throw std::invalid_argument(
@@ -947,18 +949,22 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
           fmt::format("Find Lagrangian fails in iter {}", iter_count));
     }
     if (bilinear_alternation_option.verbose) {
-      std::cout << fmt::format("Iter: {}, max(log(det(P)))={}\n", iter_count,
-                               -result_lagrangian.get_optimal_cost());
+      drake::log()->info(fmt::format(
+          "Iter: {}, max(log(det(P)))={}, solver_time {}", iter_count,
+          -result_lagrangian.get_optimal_cost(),
+          result_lagrangian.get_solver_details<solvers::MosekSolver>()
+              .optimizer_time));
     }
     if (bilinear_alternation_option.lagrangian_backoff_scale > 0) {
       result_lagrangian = BackoffProgram(
-          prog_lagrangian.get(), log_det_cost,
-          result_lagrangian.get_optimal_cost(),
+          prog_lagrangian.get(), result_lagrangian.get_optimal_cost(),
           bilinear_alternation_option.lagrangian_backoff_scale, solver_options);
       if (bilinear_alternation_option.verbose) {
-        std::cout << fmt::format(
-            "backoff with log(det(P)) {}\n",
-            -result_lagrangian.EvalBinding(log_det_cost)(0));
+        drake::log()->info(fmt::format(
+            "backoff with log(det(P)) {}, solver time {}",
+            -result_lagrangian.EvalBinding(log_det_cost)(0),
+            result_lagrangian.get_solver_details<solvers::MosekSolver>()
+                .optimizer_time));
       }
     }
     const Eigen::VectorXd lagrangian_gram_var_vals =
@@ -970,6 +976,7 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     // Update the cost.
     const double log_det_P = std::log(P_sol.determinant());
     cost_improvement = log_det_P - previous_cost;
+    drake::log()->info(fmt::format("cost improvement {}", cost_improvement));
     previous_cost = log_det_P;
 
     // Now solve the polytope problem (fix Lagrangian).
@@ -977,8 +984,14 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
         alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
         verified_gram_vars, separating_plane_vars, t_minus_t_lower,
         t_upper_minus_t, P_sol, q_sol, verification_option, &margin);
-    auto prog_polytope_cost = prog_polytope->AddLinearCost(
-        -Eigen::VectorXd::Ones(margin.rows()), 0., margin);
+    // Maximize ∏ᵢ(margin(i) + epsilon), where epsilon is a
+    // small positive number to make sure this geometric mean is always
+    // positive, even when some of margin is 0.
+    prog_polytope->AddMaximizeGeometricMeanCost(
+        Eigen::MatrixXd::Identity(margin.rows(), margin.rows()),
+        Eigen::VectorXd::Constant(margin.rows(), 1E-5), margin);
+    // TODO(hongkai.dai): remove this line when the Drake PR 16373 is merged.
+    auto prog_polytope_cost = prog_polytope->linear_costs()[0];
     auto result_polytope =
         solvers::Solve(*prog_polytope, std::nullopt, solver_options);
     if (!result_polytope.is_success()) {
@@ -987,18 +1000,22 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     }
 
     if (bilinear_alternation_option.verbose) {
-      std::cout << fmt::format("Iter: {}, polytope step cost {}\n", iter_count,
-                               result_polytope.get_optimal_cost());
+      drake::log()->info(
+          fmt::format("Iter: {}, polytope step cost {}, solver time {}",
+                      iter_count, result_polytope.get_optimal_cost(),
+                      result_polytope.get_solver_details<solvers::MosekSolver>()
+                          .optimizer_time));
     }
     if (bilinear_alternation_option.polytope_backoff_scale > 0) {
       result_polytope = BackoffProgram(
-          prog_polytope.get(), prog_polytope_cost,
-          result_polytope.get_optimal_cost(),
+          prog_polytope.get(), result_polytope.get_optimal_cost(),
           bilinear_alternation_option.polytope_backoff_scale, solver_options);
       if (bilinear_alternation_option.verbose) {
-        std::cout << fmt::format(
-            "back off, cost: {}\n",
-            result_polytope.EvalBinding(prog_polytope_cost)(0));
+        drake::log()->info(fmt::format(
+            "back off, cost: {}, solver time {}",
+            result_polytope.EvalBinding(prog_polytope_cost)(0),
+            result_polytope.get_solver_details<solvers::MosekSolver>()
+                .optimizer_time));
       }
     }
     C_val = result_polytope.GetSolution(C_var);
@@ -1017,10 +1034,6 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
     const BinarySearchOption& binary_search_option,
     const solvers::SolverOptions& solver_options,
     Eigen::VectorXd* d_final) const {
-  // TODO (amice): This method tries to find the maximum expansion of the polytope. I tried to find the minimal tightening
-  // of the polytope. Could try both: If initial region C t <= d_init infeasible then look for d_init-var_epsilon
-  // and search until either empty/region is too small and verified. If initial reagion is feasible then try to grow
-  // d_init + var_epsilon
   const int C_rows = C.rows();
   DRAKE_DEMAND(d_init.rows() == C_rows);
   DRAKE_DEMAND(C.cols() == rational_forward_kinematics_.t().rows());
@@ -1039,30 +1052,40 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
 
   VerificationOption verification_option{};
   // Checks if C*t<=d, t_lower<=t<=t_upper is collision free.
-  auto is_polytope_collision_free =
-      [this, &alternation_tuples, &C, &lagrangian_gram_vars,
-       &verified_gram_vars, &separating_plane_vars, &t_lower, &t_upper,
-       &verification_option, &solver_options](const Eigen::VectorXd& d) {
-        auto prog = this->ConstructLagrangianProgram(
-            alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-            separating_plane_vars, t_lower, t_upper, verification_option,
-            nullptr, nullptr);
-        // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
-        // empty. We find t_nominal satisfying these constraints.
-        const auto t_nominal = prog->NewContinuousVariables(
-            rational_forward_kinematics_.t().rows());
-        prog->AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf),
-                                  d, t_nominal);
-        prog->AddBoundingBoxConstraint(t_lower, t_upper, t_nominal);
+  // Update d_final = d if the program C*t<=d, t_lower <= t <= t_upper is
+  // collision free.
+  auto is_polytope_collision_free = [this, &alternation_tuples, &C,
+                                     &lagrangian_gram_vars, &verified_gram_vars,
+                                     &separating_plane_vars, &t_lower, &t_upper,
+                                     &verification_option, &solver_options,
+                                     d_final](const Eigen::VectorXd& d) {
+    auto prog = this->ConstructLagrangianProgram(
+        alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
+        separating_plane_vars, t_lower, t_upper, verification_option, nullptr,
+        nullptr);
+    // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
+    // empty. We find t_nominal satisfying these constraints.
+    // TODO(hongkai.dai): find the lower bound of epsilon such that
+    // C*t<=d + epsilon, t_lower<=t <= t_upper is still non-empty. And then
+    // remove t_nominal and its constraints from this function.
+    const auto t_nominal =
+        prog->NewContinuousVariables(rational_forward_kinematics_.t().rows());
+    prog->AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf), d,
+                              t_nominal);
+    prog->AddBoundingBoxConstraint(t_lower, t_upper, t_nominal);
 
-        const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
-        return result.is_success();
-      };
+    const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+    if (result.is_success()) {
+      *d_final = d;
+    }
+    drake::log()->info(fmt::format(
+        "Solver time {}",
+        result.get_solver_details<solvers::MosekSolver>().optimizer_time));
+    return result.is_success();
+  };
   if (is_polytope_collision_free(d_init +
                                  binary_search_option.epsilon_max *
                                      Eigen::VectorXd::Ones(d_init.rows()))) {
-    *d_final = d_init + binary_search_option.epsilon_max *
-                            Eigen::VectorXd::Ones(d_init.rows());
     return;
   }
   if (!is_polytope_collision_free(d_init +
@@ -1080,16 +1103,12 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
         d_init + eps * Eigen::VectorXd::Ones(d_init.rows());
     const bool is_feasible = is_polytope_collision_free(d);
     if (is_feasible) {
-      std::cout << fmt::format("epsilon={} is feasible\n", eps);
+      drake::log()->info(fmt::format("epsilon={} is feasible", eps));
       eps_min = eps;
     } else {
-      std::cout << fmt::format("epsilon={} is infeasible\n", eps);
+      drake::log()->info(fmt::format("epsilon={} is infeasible", eps));
       eps_max = eps;
     }
-    // TODO: we can do better than this. From a certificate of collision-free we can then maximize/minimize eps from the proof
-    // of collision freeness. This introduces a bilinear alternation which is why I said the problem is not quasi-convex
-    // this is much better than uniform expansions.
-    *d_final = d;
   }
 }
 
