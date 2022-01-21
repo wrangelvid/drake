@@ -209,43 +209,7 @@ def plot_3d_poly_marchingcubes(region, resolution, vis, name, mat = None, verbos
 
 def plot_3d_poly(region, vis, name, mat = None, verbose = False):
 
-    def prune_halfspaces(C, d):
-        num_inequalities = C.shape[0]
-        num_vars = C.shape[1]
-        redundant_idx = []
-        
-        for excluded_index in range(num_inequalities):
-        
-            #build optimization problem
-            v = C[excluded_index, :]
-            w = d[excluded_index]
-            A = np.delete(C, excluded_index, 0)
-            b = np.delete(d, excluded_index)
-            prog = MathematicalProgram()
-            x = prog.NewContinuousVariables(num_vars)
-            prog.AddCost(- v@x)
-            prog.AddConstraint(le(A@x, b))
-            prog.AddConstraint(v@x <= w+1)
-            result = Solve(prog)
-            if result.is_success():
-                val = result.get_optimal_cost()
-                if -val <= d[excluded_index]:
-                    redundant_idx.append(excluded_index)
-            else:
-                print('Solve failed. Cannot determine whether constraint redundant.')
-            if len(redundant_idx):
-                #print(redundant_idx)
-                C_simp = np.delete(C, np.array(redundant_idx), 0)
-                d_simp = np.delete(d, np.array(redundant_idx))
-            else:
-                C_simp = C
-                d_simp = d
-            
-        return C_simp, d_simp, redundant_idx
-
-    # First, prune region
-    A_new ,b_new, redundant_rows = prune_halfspaces(region.A(), region.b())
-    region = HPolyhedron(A_new, b_new)
+    region = region.ReduceInequalities()
 
     def project_and_triangulate(pts):
         n = np.cross(pts[0,:]-pts[1,:],pts[0,:]-pts[2,:])
@@ -261,13 +225,13 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
         return tri.simplices
 
     # Find feasible point in region
-    #prog = MathematicalProgram()
-    #x = prog.NewContinuousVariables(3)
-    #prog.AddConstraint(le(region.A()@x, region.b()))
-    #result = Solve(prog)
-    #if result.is_success():
+    # prog = MathematicalProgram()
+    # x = prog.NewContinuousVariables(3)
+    # prog.AddConstraint(le(region.A()@x, region.b()))
+    # result = Solve(prog)
+    # if result.is_success():
     #    x0 = result.GetSolution()
-    #else:
+    # else:
     #    print("Solve failed. No feasible point found in region.")
     x0 = region.MaximumVolumeInscribedEllipsoid().center()
     A = region.A()
@@ -287,7 +251,7 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
     vertices = t_v[:,1:] + x0  # vertices need to be moved back
 
     # only keep nonempty facets
-    facets_with_duplicates = [np.array(list(facet)) for facet in poly.get_input_incidence() if list(facet)]
+    facets_with_duplicates = [np.array(list(facet)) for facet in poly.get_input_incidence() if len(list(facet))>2]
 
     # if facet is subset of any other facet, remove
     remove_idxs = []
@@ -318,7 +282,7 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
 
         count += vertices[facet].shape[0]
 
-    print('end')
+    # print('end')
     mesh_vertices = np.concatenate(mesh_vertices, 0)
     mesh_triangles = np.concatenate(mesh_triangles, 0)
 
@@ -365,7 +329,7 @@ def plot_regions(vis, regions, ellipses = None, region_suffix='', opacity = 0.5)
         c = colors[i]
         mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=False)
         mat.opacity = opacity
-        #plot_3d_poly(region=region,
+        # plot_3d_poly(region=region,
         #                   vis=vis['iris']['regions'+region_suffix],
         #                   name=str(i),
         #                   mat=mat)

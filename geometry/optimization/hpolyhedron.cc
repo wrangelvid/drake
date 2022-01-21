@@ -304,11 +304,15 @@ HPolyhedron HPolyhedron::ReduceInequalities() const {
       num_kept--;
     }
   }
+
   Eigen::MatrixXd A_new(num_kept, num_vars);
   Eigen::VectorXd b_new(num_kept);
-  for(const int ind : kept_indices){
-    A_new.row(ind) = A_.row(ind);
-    b_new.row(ind) = b_.row(ind);
+  int i = 0;
+  for(const int ind : kept_indices)
+  {
+    A_new.row(i) = A_.row(ind);
+    b_new.row(i) = b_.row(ind);
+    i++;
   }
   return HPolyhedron(A_new, b_new);
 }
