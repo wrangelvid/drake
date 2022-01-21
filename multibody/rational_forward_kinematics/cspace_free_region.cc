@@ -57,8 +57,6 @@ void FindMonomialBasisForPolytopicRegion(
   // computed.
   const SortedPair<multibody::BodyIndex> kinematics_chain(
       rational.link_polytope->body_index(), rational.expressed_body_index);
-  std::cout << rational.link_polytope->body_index() << std::endl;
-  std::cout << rational.expressed_body_index << std::endl;
 
   const auto it = map_chain_to_monomial_basis->find(kinematics_chain);
   if (it == map_chain_to_monomial_basis->end()) {
