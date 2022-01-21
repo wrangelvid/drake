@@ -259,9 +259,12 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
       .def_readwrite("epsilon_min",
           &CspaceFreeRegion::BinarySearchOption::epsilon_min,
           doc.CspaceFreeRegion.BinarySearchOption.epsilon_min.doc)
-      .def_readwrite("epsilon_tol",
-          &CspaceFreeRegion::BinarySearchOption::epsilon_tol,
-          doc.CspaceFreeRegion.BinarySearchOption.epsilon_tol.doc);
+      .def_readwrite("max_iters",
+          &CspaceFreeRegion::BinarySearchOption::max_iters,
+          doc.CspaceFreeRegion.BinarySearchOption.max_iters.doc)
+      .def_readwrite("search_d",
+          &CspaceFreeRegion::BinarySearchOption::search_d,
+          doc.CspaceFreeRegion.BinarySearchOption.search_d.doc);
 
   // CspaceFreeRegion
   py::class_<CspaceFreeRegion> cspace_cls(
@@ -375,34 +378,13 @@ PYBIND11_MODULE(rational_forward_kinematics, m) {
           py::arg("separating_plane_vars"), py::arg("t_lower"),
           py::arg("t_upper"), py::arg("option"), py::arg("redundant_tighten"),
           doc.CspaceFreeRegion.ConstructLagrangianProgram.doc)
-      .def(
-          "ConstructPolytopeProgram",
-          [](const CspaceFreeRegion* self,
-              const std::vector<CspaceFreeRegion::CspacePolytopeTuple>&
-                  alternation_tuples,
-              const MatrixX<symbolic::Variable>& C,
-              const VectorX<symbolic::Variable>& d,
-              const VectorX<symbolic::Polynomial>& d_minus_Ct,
-              const Eigen::VectorXd& lagrangian_gram_var_vals,
-              const VectorX<symbolic::Variable>& verified_gram_vars,
-              const VectorX<symbolic::Variable>& separating_plane_vars,
-              const VectorX<symbolic::Polynomial>& t_minus_t_lower,
-              const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-              const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
-              const VerificationOption& option) {
-            VectorX<symbolic::Variable> margin;
-            auto prog = self->ConstructPolytopeProgram(alternation_tuples, C, d,
-                d_minus_Ct, lagrangian_gram_var_vals, verified_gram_vars,
-                separating_plane_vars, t_minus_t_lower, t_upper_minus_t, P, q,
-                option, &margin);
-            return std::make_tuple(std::move(prog), margin);
-          },
+      .def("ConstructPolytopeProgram",
+          &CspaceFreeRegion::ConstructPolytopeProgram,
           py::arg("alternation_tuples"), py::arg("C"), py::arg("d"),
           py::arg("d_minus_Ct"), py::arg("lagrangian_gram_var_vals"),
           py::arg("verified_gram_vars"), py::arg("separating_plane_vars"),
-          py::arg("t_minus_t_lower"), py::arg("t_upper_minus_t"), py::arg("P"),
-          py::arg("q"), py::arg("option"),
-          doc.CspaceFreeRegion.ConstructPolytopeProgram.doc)
+          py::arg("t_minus_t_lower"), py::arg("t_upper_minus_t"),
+          py::arg("option"), doc.CspaceFreeRegion.ConstructPolytopeProgram.doc)
       .def(
           "CspacePolytopeBilinearAlternation",
           [](const CspaceFreeRegion* self,

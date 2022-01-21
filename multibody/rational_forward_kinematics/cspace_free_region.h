@@ -316,15 +316,9 @@ class CspaceFreeRegion {
   /**
    * Given lagrangian polynomials, construct an optimization program to search
    * for the separating plane, the C-space polytope C*t<=d.
-   * The goal is to find the polytope C*t<=d that contains the ellipsoid {Py+q|
-   * |y|₂≤1} with the maximal margin between the polytope and the ellipsoid.
    * Mathematically the optimization program is
    * p(t) - l_polytope(t).dot(d - C*t) - l_lower(t).dot(t - t_lower) -
    * l_upper(t).dot(t_upper-t) >= 0
-   * |cᵢᵀP| ≤ dᵢ − cᵢᵀq − δᵢ
-   * |cᵢ|₂ ≤ 1
-   * where δ is the margin between the polytope and the ellipsoid. cᵢᵀ is the
-   * i'th row of C.
    * @note The constructed program doesn't have a cost yet.
    * @param alternation_tuples Returned from
    * GenerateTuplesForBilinearAlternation.
@@ -340,10 +334,6 @@ class CspaceFreeRegion {
    * GenerateTuplesForBilinearAlternation.
    * @param t_minus_t_lower t - t_lower
    * @param t_upper_minus_t t_upper - t
-   * @param P The parameter for the inscribed ellipsoid. This P should be a
-   * symmetric matrix.
-   * @param q The parameter for the ellipsoid.
-   * @param[out] margin δ in the documentation above.
    */
   std::unique_ptr<solvers::MathematicalProgram> ConstructPolytopeProgram(
       const std::vector<CspacePolytopeTuple>& alternation_tuples,
@@ -355,9 +345,7 @@ class CspaceFreeRegion {
       const VectorX<symbolic::Variable>& separating_plane_vars,
       const VectorX<symbolic::Polynomial>& t_minus_t_lower,
       const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-      const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
-      const VerificationOption& option,
-      VectorX<symbolic::Variable>* margin) const;
+      const VerificationOption& option) const;
 
   struct BilinearAlternationOption {
     /** Number of iterations. One lagrangian step + one polytope step is counted
@@ -414,7 +402,11 @@ class CspaceFreeRegion {
   struct BinarySearchOption {
     double epsilon_max{10};
     double epsilon_min{0};
-    double epsilon_tol{1E-3};
+    int max_iters{5};
+    // If set to true, then after we verify that C*t<=d is collision free, we
+    // then fix the Lagrangian multiplier and search the right-hand side vector
+    // d through another SOS program.
+    bool search_d{true};
   };
 
   /**
@@ -425,6 +417,11 @@ class CspaceFreeRegion {
    * is collision free, and do a binary search on ε.
    * where t = tan((q - q_star)/2), t_lower and t_upper are computed from robot
    * joint limits.
+   * @note that if binary_search_option.search_d is true, then after we find a
+   * feasible scalar ε with C*t<= d+ε being collision free, we then fix the
+   * Lagrangian multiplier and search d, and denote the newly found d as
+   * d_reset. We then reset ε to zero and find the collision free region C*t <=
+   * d_reset + ε through binary search.
    */
   void CspacePolytopeBinarySearch(
       const Eigen::Ref<const Eigen::VectorXd>& q_star,
@@ -625,5 +622,17 @@ void FindRedundantInequalities(
     double tighten, std::unordered_set<int>* C_redundant_indices,
     std::unordered_set<int>* t_lower_redundant_indices,
     std::unordered_set<int>* t_upper_redundant_indices);
+
+/**
+ * When we do binary search to find epsilon such that C*t<= d + epsilon is
+ * collision free, if epsilon is too small, then this polytope {t| C*t<=
+ * d+epsilon, t_lower<=t<=t_upper} can be empty. To avoid this case, we find
+ * the minimal epsilon such that this polytope is non-empty.
+ */
+double FindEpsilonLower(const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+                        const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+                        const Eigen::Ref<const Eigen::MatrixXd>& C,
+                        const Eigen::Ref<const Eigen::VectorXd>& d);
+
 }  // namespace multibody
 }  // namespace drake

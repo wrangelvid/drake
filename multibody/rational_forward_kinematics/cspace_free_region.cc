@@ -783,9 +783,7 @@ CspaceFreeRegion::ConstructPolytopeProgram(
     const VectorX<symbolic::Variable>& separating_plane_vars,
     const VectorX<symbolic::Polynomial>& t_minus_t_lower,
     const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-    const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
-    const VerificationOption& option,
-    VectorX<symbolic::Variable>* margin) const {
+    const VerificationOption& option) const {
   if (option.link_polynomial_type !=
       solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
     throw std::runtime_error("Only support sos polynomial for now");
@@ -857,11 +855,6 @@ CspaceFreeRegion::ConstructPolytopeProgram(
       prog->AddLinearEqualityConstraint(item.second, 0);
     }
   }
-
-  *margin = prog->NewContinuousVariables(C.rows(), "margin");
-  AddOuterPolytope(prog.get(), P, q, C, d, *margin);
-  // margin >= 0.
-  prog->AddBoundingBoxConstraint(0, kInf, *margin);
   return prog;
 }
 
@@ -1015,7 +1008,12 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     auto prog_polytope = ConstructPolytopeProgram(
         alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
         verified_gram_vars, separating_plane_vars, t_minus_t_lower,
-        t_upper_minus_t, P_sol, q_sol, verification_option, &margin);
+        t_upper_minus_t, verification_option);
+    // Add the constraint that the polytope contains the ellipsoid
+    margin = prog_polytope->NewContinuousVariables(C_var.rows(), "margin");
+    AddOuterPolytope(prog_polytope.get(), P_sol, q_sol, C_var, d_var, margin);
+    prog_polytope->AddBoundingBoxConstraint(0, kInf, margin);
+
     // Maximize ∏ᵢ(margin(i) + epsilon), where epsilon is a
     // small positive number to make sure this geometric mean is always
     // positive, even when some of margin is 0.
@@ -1066,6 +1064,9 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
     const BinarySearchOption& binary_search_option,
     const solvers::SolverOptions& solver_options,
     Eigen::VectorXd* d_final) const {
+  // The polytope region is C * t <= d_without_epsilon + epsilon. We might
+  // change d_without_epsilon during the binary search process.
+  Eigen::VectorXd d_without_epsilon = d_init;
   const int C_rows = C.rows();
   DRAKE_DEMAND(d_init.rows() == C_rows);
   DRAKE_DEMAND(C.cols() == rational_forward_kinematics_.t().rows());
@@ -1081,67 +1082,101 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
       &d_minus_Ct, &t_lower, &t_upper, &t_minus_t_lower, &t_upper_minus_t,
       &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
       &separating_plane_vars);
+  DRAKE_DEMAND(binary_search_option.epsilon_min >=
+               FindEpsilonLower(t_lower, t_upper, C, d_init));
 
   VerificationOption verification_option{};
   // Checks if C*t<=d, t_lower<=t<=t_upper is collision free.
   // Update d_final = d if the program C*t<=d, t_lower <= t <= t_upper is
   // collision free.
-  auto is_polytope_collision_free = [this, &alternation_tuples, &C,
-                                     &lagrangian_gram_vars, &verified_gram_vars,
-                                     &separating_plane_vars, &t_lower, &t_upper,
-                                     &verification_option, &solver_options,
-                                     d_final](const Eigen::VectorXd& d) {
-    const double redundant_tighten = 0.;
-    auto prog = this->ConstructLagrangianProgram(
-        alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-        separating_plane_vars, t_lower, t_upper, verification_option,
-        redundant_tighten, nullptr, nullptr);
-    // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
-    // empty. We find t_nominal satisfying these constraints.
-    // TODO(hongkai.dai): find the lower bound of epsilon such that
-    // C*t<=d + epsilon, t_lower<=t <= t_upper is still non-empty. And then
-    // remove t_nominal and its constraints from this function.
-    const auto t_nominal =
-        prog->NewContinuousVariables(rational_forward_kinematics_.t().rows());
-    prog->AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf), d,
-                              t_nominal);
-    prog->AddBoundingBoxConstraint(t_lower, t_upper, t_nominal);
-
-    const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
-    if (result.is_success()) {
-      *d_final = d;
-    }
-    drake::log()->info(fmt::format(
-        "Solver time {}",
-        result.get_solver_details<solvers::MosekSolver>().optimizer_time));
-    return result.is_success();
-  };
-  if (is_polytope_collision_free(d_init +
-                                 binary_search_option.epsilon_max *
-                                     Eigen::VectorXd::Ones(d_init.rows()))) {
+  auto is_polytope_collision_free =
+      [this, &alternation_tuples, &C, &lagrangian_gram_vars,
+       &verified_gram_vars, &separating_plane_vars, &t_lower, &t_upper,
+       &verification_option, &solver_options, &C_var, &d_var, &d_minus_Ct,
+       &t_minus_t_lower, &t_upper_minus_t](
+          const Eigen::VectorXd& d, bool search_d, Eigen::VectorXd* d_sol) {
+        const double redundant_tighten = 0.;
+        auto prog = this->ConstructLagrangianProgram(
+            alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
+            separating_plane_vars, t_lower, t_upper, verification_option,
+            redundant_tighten, nullptr, nullptr);
+        const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+        if (result.is_success()) {
+          *d_sol = d;
+          if (search_d) {
+            // Now fix the Lagrangian and C, and search for d.
+            const auto lagrangian_gram_var_vals =
+                result.GetSolution(lagrangian_gram_vars);
+            auto prog_polytope = this->ConstructPolytopeProgram(
+                alternation_tuples, C_var, d_var, d_minus_Ct,
+                lagrangian_gram_var_vals, verified_gram_vars,
+                separating_plane_vars, t_minus_t_lower, t_upper_minus_t,
+                verification_option);
+            prog_polytope->AddBoundingBoxConstraint(C, C, C_var);
+            // d_var >= d
+            prog_polytope->AddBoundingBoxConstraint(
+                d, Eigen::VectorXd::Constant(d.rows(), kInf), d_var);
+            // maximize d_var.
+            prog_polytope->AddLinearCost(-Eigen::VectorXd::Ones(d_var.rows()),
+                                         0, d_var);
+            const auto result_polytope =
+                solvers::Solve(*prog_polytope, std::nullopt, solver_options);
+            if (result_polytope.is_success()) {
+              *d_sol = result_polytope.GetSolution(d_var);
+            }
+          }
+        }
+        drake::log()->info(fmt::format(
+            "Solver time {}",
+            result.get_solver_details<solvers::MosekSolver>().optimizer_time));
+        return result.is_success();
+      };
+  if (is_polytope_collision_free(
+          d_without_epsilon +
+              binary_search_option.epsilon_max *
+                  Eigen::VectorXd::Ones(d_without_epsilon.rows()),
+          binary_search_option.search_d, d_final)) {
     return;
   }
-  if (!is_polytope_collision_free(d_init +
-                                  binary_search_option.epsilon_min *
-                                      Eigen::VectorXd::Ones(d_init.rows()))) {
+  if (!is_polytope_collision_free(
+          d_without_epsilon +
+              binary_search_option.epsilon_min *
+                  Eigen::VectorXd::Ones(d_without_epsilon.rows()),
+          false /* don't search for d */, d_final)) {
     throw std::runtime_error(
         fmt::format("binary search: the initial epsilon {} is infeasible",
                     binary_search_option.epsilon_min));
   }
   double eps_max = binary_search_option.epsilon_max;
   double eps_min = binary_search_option.epsilon_min;
-  while (eps_max - eps_min > binary_search_option.epsilon_tol) {
+  int iter_count = 0;
+  while (iter_count < binary_search_option.max_iters) {
     const double eps = (eps_max + eps_min) / 2;
     const Eigen::VectorXd d =
-        d_init + eps * Eigen::VectorXd::Ones(d_init.rows());
-    const bool is_feasible = is_polytope_collision_free(d);
+        d_without_epsilon +
+        eps * Eigen::VectorXd::Ones(d_without_epsilon.rows());
+    const bool is_feasible =
+        is_polytope_collision_free(d, binary_search_option.search_d, d_final);
     if (is_feasible) {
       drake::log()->info(fmt::format("epsilon={} is feasible", eps));
-      eps_min = eps;
+      // Now we need to reset d_without_epsilon. The invariance we want is that
+      // C*t<= d_without_epsilon + eps_min * 𝟏 is collision free, while C*t <=
+      // d_without_epsilon + eps_max * 𝟏 is not feasible with SOS. We know that
+      // d_final + 0 * 𝟏 is collision free. Also (d_without_epsilon + eps_max *
+      // 𝟏) is not. So we set d_without_epsilon to d_final, and update eps_min
+      // and eps_max accordingly.
+      eps_max = (d_without_epsilon +
+                 eps_max * Eigen::VectorXd::Ones(d.rows(), 1) - *d_final)
+                    .maxCoeff();
+      d_without_epsilon = *d_final;
+      eps_min = 0;
+      drake::log()->info(
+          fmt::format("reset eps_min={}, eps_max={}", eps_min, eps_max));
     } else {
       drake::log()->info(fmt::format("epsilon={} is infeasible", eps));
       eps_max = eps;
     }
+    iter_count++;
   }
 }
 
@@ -1463,6 +1498,28 @@ void FindRedundantInequalities(
                                               index - C.rows() - nt);
     }
   }
+}
+
+double FindEpsilonLower(const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+                        const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+                        const Eigen::Ref<const Eigen::MatrixXd>& C,
+                        const Eigen::Ref<const Eigen::VectorXd>& d) {
+  solvers::MathematicalProgram prog{};
+  const int nt = t_lower.rows();
+  const auto t = prog.NewContinuousVariables(nt, "t");
+  const auto epsilon = prog.NewContinuousVariables<1>("epsilon");
+  // Add the constraint C*t<=d+epsilon and t_lower <= t <= t_upper.
+  Eigen::MatrixXd A(C.rows(), nt + 1);
+  A.leftCols(nt) = C;
+  A.rightCols<1>() = -Eigen::VectorXd::Ones(C.rows());
+  prog.AddLinearConstraint(A, Eigen::VectorXd::Constant(C.rows(), -kInf), d,
+                           {t, epsilon});
+  prog.AddBoundingBoxConstraint(t_lower, t_upper, t);
+  // minimize epsilon.
+  prog.AddLinearCost(Vector1d(1), 0, epsilon);
+  const auto result = solvers::Solve(prog);
+  DRAKE_DEMAND(result.is_success());
+  return result.get_optimal_cost();
 }
 
 // Explicit instantiation.
