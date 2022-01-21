@@ -129,9 +129,10 @@ class IiwaCspaceTest(unittest.TestCase):
         P = np.empty((7, 7), dtype=sym.Variable)
         q = np.empty(7, dtype=sym.Variable)
         verification_option = mut.VerificationOption()
+        redundant_tighten = 0.5
         prog_lagrangian = dut.ConstructLagrangianProgram(
             alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-            separating_plane_vars, t_lower, t_upper, verification_option)
+            separating_plane_vars, t_lower, t_upper, verification_option, redundant_tighten)
         P, q = mut.AddInscribedEllipsoid(prog_lagrangian, C, d, t_lower,
                                          t_upper)
         result_lagrangian = mp.Solve(prog_lagrangian)

@@ -105,6 +105,7 @@ drake_cc_library(
         ":generate_monomial_basis_util",
         ":plane_side",
         ":rational_forward_kinematics_core",
+        ":redundant_inequality_pruning",
         "//geometry/optimization:convex_set",
         "//solvers:mathematical_program",
         "//solvers:mathematical_program_result",

@@ -8,6 +8,7 @@
 #include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/rational_forward_kinematics/cspace_free_region.h"
 #include "drake/solvers/common_solver_option.h"
+#include "drake/solvers/mosek_solver.h"
 #include "drake/solvers/solve.h"
 #include "drake/systems/framework/diagram_builder.h"
 
@@ -151,6 +152,10 @@ void BuildCandidateCspacePolytope(const Eigen::VectorXd q_free,
 }
 
 int DoMain() {
+  // Ensure that we have the MOSEK license for the entire duration of this test,
+  // so that we do not have to release and re-acquire the license for every
+  // test.
+  auto mosek_license = drake::solvers::MosekSolver::AcquireLicense();
   const IiwaDiagram iiwa_diagram{};
   auto diagram_context = iiwa_diagram.diagram().CreateDefaultContext();
   auto& plant_context =
@@ -180,7 +185,7 @@ int DoMain() {
                                  d_init, binary_search_option, solver_options,
                                  &d_binary_search);
   CspaceFreeRegion::BilinearAlternationOption bilinear_alternation_option{
-      .max_iters = 10, .convergence_tol = 0.001};
+      .max_iters = 10, .convergence_tol = 0.001, .redundant_tighten = 0.5};
   Eigen::MatrixXd C_final;
   Eigen::VectorXd d_final;
   Eigen::MatrixXd P_final;
