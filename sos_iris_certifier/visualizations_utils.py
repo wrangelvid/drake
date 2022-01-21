@@ -261,15 +261,15 @@ def plot_3d_poly(region, vis, name, mat = None, verbose = False):
         return tri.simplices
 
     # Find feasible point in region
-    prog = MathematicalProgram()
-    x = prog.NewContinuousVariables(3)
-    prog.AddConstraint(le(region.A()@x, region.b()))
-    result = Solve(prog)
-    if result.is_success():
-        x0 = result.GetSolution()
-    else:
-        print("Solve failed. No feasible point found in region.")
-
+    #prog = MathematicalProgram()
+    #x = prog.NewContinuousVariables(3)
+    #prog.AddConstraint(le(region.A()@x, region.b()))
+    #result = Solve(prog)
+    #if result.is_success():
+    #    x0 = result.GetSolution()
+    #else:
+    #    print("Solve failed. No feasible point found in region.")
+    x0 = region.MaximumVolumeInscribedEllipsoid().center()
     A = region.A()
     b = region.b() - A@x0
 
@@ -365,15 +365,15 @@ def plot_regions(vis, regions, ellipses = None, region_suffix='', opacity = 0.5)
         c = colors[i]
         mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=False)
         mat.opacity = opacity
-        plot_3d_poly(region=region,
-                           vis=vis['iris']['regions'+region_suffix],
-                           name=str(i),
-                           mat=mat)
-        # plot_3d_poly_marchingcubes(region=region,
-        #                    resolution=30,
-        #                    vis=vis['iris']['regions'+region_suffix],
-        #                    name=str(i),
-        #                    mat=mat)
+        #plot_3d_poly(region=region,
+        #                   vis=vis['iris']['regions'+region_suffix],
+        #                   name=str(i),
+        #                   mat=mat)
+        plot_3d_poly_marchingcubes(region=region,
+                            resolution=30,
+                            vis=vis['iris']['regions'+region_suffix],
+                            name=str(i),
+                            mat=mat)
         if ellipses is not None:
             C = ellipses[i].A()  # [:, (0,2,1)]
             d = ellipses[i].center()  # [[0,2,1]]

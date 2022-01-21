@@ -85,6 +85,7 @@ drake_jupyter_py_binary(
         "//sos_iris_certifier:iris_plant_visualizer",
         "//sos_iris_certifier:iris_utils",
         "//sos_iris_certifier:visualizations_utils",
+        "//sandbox:rrtiris"
     ],
 )
 
