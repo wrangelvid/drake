@@ -176,7 +176,7 @@ int DoMain() {
   CspaceFreeRegion::FilteredCollisionPairs filtered_collision_pairs{};
 
   CspaceFreeRegion::BinarySearchOption binary_search_option{
-      .epsilon_max = 0.01, .epsilon_min = 0., .epsilon_tol = 0.005};
+      .epsilon_max = 0.01, .epsilon_min = 0., .max_iters = 2};
   solvers::SolverOptions solver_options;
   solver_options.SetOption(solvers::CommonSolverOption::kPrintToConsole, false);
   Eigen::VectorXd d_binary_search;
