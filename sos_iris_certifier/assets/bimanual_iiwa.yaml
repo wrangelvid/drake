@@ -5,12 +5,13 @@ directives:
 # Add iiwa_1
 - add_model:
     name: iiwa_1
-    file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_collision.urdf
-    # file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_dense_collision.urdf
+    #file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_collision.urdf
+    file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_with_box_collision.sdf
 
 - add_weld:
     parent: world
-    child: iiwa_1::base
+    #child: iiwa_1::base
+    child: iiwa_1::iiwa_link_0
 
 # Add schunk_1
 - add_model:
@@ -31,9 +32,8 @@ directives:
 # Add iiwa_2
 - add_model:
     name: iiwa_2
-    file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_collision.urdf
-    # file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_dense_collision.urdf
-
+    #file: package://drake/manipulation/models/iiwa_description/urdf/iiwa14_spheres_collision.urdf
+    file: package://drake/manipulation/models/iiwa_description/iiwa7/iiwa7_with_box_collision.sdf 
 
 - add_frame:
     name: iiwa_2_origin
@@ -43,7 +43,7 @@ directives:
 
 - add_weld:
     parent: iiwa_2_origin
-    child: iiwa_2::base
+    child: iiwa_2::iiwa_link_0
 
 # Add schunk_2
 - add_model:
