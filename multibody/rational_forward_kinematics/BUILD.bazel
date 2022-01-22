@@ -105,6 +105,7 @@ drake_cc_library(
         ":generate_monomial_basis_util",
         ":plane_side",
         ":rational_forward_kinematics_core",
+        ":redundant_inequality_pruning",
         "//geometry/optimization:convex_set",
         "//solvers:mathematical_program",
         "//solvers:mathematical_program_result",
@@ -246,6 +247,25 @@ drake_cc_googletest(
     name = "redundant_inequality_pruning_test",
     deps = [
         ":redundant_inequality_pruning",
+    ],
+)
+
+drake_cc_binary(
+    name = "iiwa_shelf_demo",
+    srcs = ["test/iiwa_shelf_demo.cc"],
+    data = [
+        "//examples/kuka_iiwa_arm:models",
+        "//manipulation/models/iiwa_description:models",
+        "//manipulation/models/wsg_50_description:models",
+        "//sos_iris_certifier:models",
+    ],
+    deps = [
+        ":cspace_free_region",
+        "//common:find_resource",
+        "//geometry:meshcat_visualizer",
+        "//multibody/inverse_kinematics",
+        "//multibody/parsing:parser",
+        "//multibody/plant",
     ],
 )
 

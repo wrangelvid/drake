@@ -129,9 +129,11 @@ class IiwaCspaceTest(unittest.TestCase):
         P = np.empty((7, 7), dtype=sym.Variable)
         q = np.empty(7, dtype=sym.Variable)
         verification_option = mut.VerificationOption()
+        redundant_tighten = 0.5
         prog_lagrangian = dut.ConstructLagrangianProgram(
             alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
-            separating_plane_vars, t_lower, t_upper, verification_option)
+            separating_plane_vars, t_lower, t_upper, verification_option,
+            redundant_tighten)
         P, q = mut.AddInscribedEllipsoid(prog_lagrangian, C, d, t_lower,
                                          t_upper)
         result_lagrangian = mp.Solve(prog_lagrangian)
@@ -142,11 +144,11 @@ class IiwaCspaceTest(unittest.TestCase):
         P_sol = result_lagrangian.GetSolution(P)
         q_sol = result_lagrangian.GetSolution(q)
 
-        prog_polytope, margin = dut.ConstructPolytopeProgram(
+        prog_polytope = dut.ConstructPolytopeProgram(
             alternation_tuples, C_var, d_var, d_minus_Ct,
             lagrangian_gram_var_vals, verified_gram_vars,
-            separating_plane_vars, t_minus_t_lower, t_upper_minus_t, P_sol,
-            q_sol, verification_option)
+            separating_plane_vars, t_minus_t_lower, t_upper_minus_t,
+            verification_option)
         result_polytope = mp.Solve(prog_polytope)
         self.assertTrue(result_polytope.is_success())
 
@@ -175,7 +177,7 @@ class IiwaCspaceTest(unittest.TestCase):
         binary_search_option = mut.BinarySearchOption()
         binary_search_option.epsilon_max = 1
         binary_search_option.epsilon_min = 0.
-        binary_search_option.epsilon_tol = 0.1
+        binary_search_option.max_iters = 3
         solver_options = mp.SolverOptions()
         d_final = dut.CspacePolytopeBinarySearch(q_star,
                                                  filtered_collision_pairs,

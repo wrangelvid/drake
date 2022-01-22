@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -140,12 +141,6 @@ class CspaceFreeRegion {
                    SeparatingPlaneOrder plane_order,
                    CspaceRegionType cspace_region_type);
 
-  const std::unordered_map<SortedPair<ConvexGeometry::Id>,
-                           const SeparatingPlane*>&
-  map_polytopes_to_separating_planes() const {
-    return map_polytopes_to_separating_planes_;
-  }
-
   /**
    * Generate all the rational functions in the form aᵀx + b -1 or -1-aᵀx-b
    * whose non-negativity implies that the separating plane aᵀx + b =0 separates
@@ -188,6 +183,10 @@ class CspaceFreeRegion {
     std::vector<symbolic::Polynomial> verified_polynomials;
   };
 
+  /* @note I strongly recommend NOT to use this function. I created this
+   * function for fast prototyping. It is very slow when constructing the
+   * program (as it incurs a lot of dynamic memory allocation.
+   */
   CspacePolytopeProgramReturn ConstructProgramForCspacePolytope(
       const Eigen::Ref<const Eigen::VectorXd>& q_star,
       const std::vector<LinkVertexOnPlaneSideRational>& rationals,
@@ -291,6 +290,11 @@ class CspaceFreeRegion {
    * GenerateTuplesForBilinearAlternation.
    * @param t_lower The lower bounds of t computed from joint limits.
    * @param t_upper The upper bounds of t computed from joint limits.
+   * @param redundant_tighten. We aggregate the constraint {C*t<=d, t_lower <= t
+   * <= t_upper} as C̅t ≤ d̅. A row of C̅t ≤ d̅is regarded as redundant, if the C̅ᵢt
+   * ≤ d̅ᵢ − δ is implied by the rest of the constraint, where
+   * δ=redundant_tighten. If redundant_tighten=std::nullopt, then we don't try
+   * to identify the redundant constraints.
    * @param[out] P The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
    * 1}. Set P=nullptr if you don't want the inscribed ellipsoid.
    * @param[out] q The inscribed ellipsoid is parameterized as {Py+q | |y|₂ ≤
@@ -306,21 +310,15 @@ class CspaceFreeRegion {
       const VectorX<symbolic::Variable>& separating_plane_vars,
       const Eigen::Ref<const Eigen::VectorXd>& t_lower,
       const Eigen::Ref<const Eigen::VectorXd>& t_upper,
-      const VerificationOption& option, MatrixX<symbolic::Variable>* P,
-      VectorX<symbolic::Variable>* q) const;
+      const VerificationOption& option, std::optional<double> redundant_tighten,
+      MatrixX<symbolic::Variable>* P, VectorX<symbolic::Variable>* q) const;
 
   /**
    * Given lagrangian polynomials, construct an optimization program to search
    * for the separating plane, the C-space polytope C*t<=d.
-   * The goal is to find the polytope C*t<=d that contains the ellipsoid {Py+q|
-   * |y|₂≤1} with the maximal margin between the polytope and the ellipsoid.
    * Mathematically the optimization program is
    * p(t) - l_polytope(t).dot(d - C*t) - l_lower(t).dot(t - t_lower) -
    * l_upper(t).dot(t_upper-t) >= 0
-   * |cᵢᵀP| ≤ dᵢ − cᵢᵀq − δᵢ
-   * |cᵢ|₂ ≤ 1
-   * where δ is the margin between the polytope and the ellipsoid. cᵢᵀ is the
-   * i'th row of C.
    * @note The constructed program doesn't have a cost yet.
    * @param alternation_tuples Returned from
    * GenerateTuplesForBilinearAlternation.
@@ -336,10 +334,6 @@ class CspaceFreeRegion {
    * GenerateTuplesForBilinearAlternation.
    * @param t_minus_t_lower t - t_lower
    * @param t_upper_minus_t t_upper - t
-   * @param P The parameter for the inscribed ellipsoid. This P should be a
-   * symmetric matrix.
-   * @param q The parameter for the ellipsoid.
-   * @param[out] margin δ in the documentation above.
    */
   std::unique_ptr<solvers::MathematicalProgram> ConstructPolytopeProgram(
       const std::vector<CspacePolytopeTuple>& alternation_tuples,
@@ -351,9 +345,7 @@ class CspaceFreeRegion {
       const VectorX<symbolic::Variable>& separating_plane_vars,
       const VectorX<symbolic::Polynomial>& t_minus_t_lower,
       const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-      const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
-      const VerificationOption& option,
-      VectorX<symbolic::Variable>* margin) const;
+      const VerificationOption& option) const;
 
   struct BilinearAlternationOption {
     /** Number of iterations. One lagrangian step + one polytope step is counted
@@ -377,6 +369,9 @@ class CspaceFreeRegion {
     double lagrangian_backoff_scale{0.};
     double polytope_backoff_scale{0.};
     int verbose{true};
+    // How much tighten we use to determine if a row in {C*t<=d, t_lower <= t <=
+    // t_upper} is redundant.
+    std::optional<double> redundant_tighten{std::nullopt};
   };
 
   /**
@@ -407,7 +402,11 @@ class CspaceFreeRegion {
   struct BinarySearchOption {
     double epsilon_max{10};
     double epsilon_min{0};
-    double epsilon_tol{1E-3};
+    int max_iters{5};
+    // If set to true, then after we verify that C*t<=d is collision free, we
+    // then fix the Lagrangian multiplier and search the right-hand side vector
+    // d through another SOS program.
+    bool search_d{true};
   };
 
   /**
@@ -418,6 +417,11 @@ class CspaceFreeRegion {
    * is collision free, and do a binary search on ε.
    * where t = tan((q - q_star)/2), t_lower and t_upper are computed from robot
    * joint limits.
+   * @note that if binary_search_option.search_d is true, then after we find a
+   * feasible scalar ε with C*t<= d+ε being collision free, we then fix the
+   * Lagrangian multiplier and search d, and denote the newly found d as
+   * d_reset. We then reset ε to zero and find the collision free region C*t <=
+   * d_reset + ε through binary search.
    */
   void CspacePolytopeBinarySearch(
       const Eigen::Ref<const Eigen::VectorXd>& q_star,
@@ -439,6 +443,20 @@ class CspaceFreeRegion {
   const std::map<multibody::BodyIndex, std::vector<ConvexPolytope>>&
   polytope_geometries() const {
     return polytope_geometries_;
+  }
+
+  const std::unordered_map<SortedPair<ConvexGeometry::Id>,
+                           const SeparatingPlane*>&
+  map_polytopes_to_separating_planes() const {
+    return map_polytopes_to_separating_planes_;
+  }
+
+  const SeparatingPlaneOrder& plane_order() const {
+    return plane_order_;
+  }
+
+  const CspaceRegionType& cspace_region_type() const {
+    return cspace_region_type_;
   }
 
  private:
@@ -592,5 +610,29 @@ std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     const systems::Diagram<double>& diagram,
     const MultibodyPlant<double>* plant,
     const geometry::SceneGraph<double>* scene_graph);
+
+/**
+ * Find the redundant constraint in {C*t<=d, t_lower<=t<=t_upper}. We regard a
+ * constraint aᵀt ≤ b being redundant if its tightened version aᵀt≤ b-tighten is
+ * implied by the other (untightened) constraints.
+ */
+void FindRedundantInequalities(
+    const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
+    const Eigen::VectorXd& t_lower, const Eigen::VectorXd& t_upper,
+    double tighten, std::unordered_set<int>* C_redundant_indices,
+    std::unordered_set<int>* t_lower_redundant_indices,
+    std::unordered_set<int>* t_upper_redundant_indices);
+
+/**
+ * When we do binary search to find epsilon such that C*t<= d + epsilon is
+ * collision free, if epsilon is too small, then this polytope {t| C*t<=
+ * d+epsilon, t_lower<=t<=t_upper} can be empty. To avoid this case, we find
+ * the minimal epsilon such that this polytope is non-empty.
+ */
+double FindEpsilonLower(const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+                        const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+                        const Eigen::Ref<const Eigen::MatrixXd>& C,
+                        const Eigen::Ref<const Eigen::VectorXd>& d);
+
 }  // namespace multibody
 }  // namespace drake

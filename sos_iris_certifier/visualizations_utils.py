@@ -10,7 +10,6 @@ import colorsys
 import cdd
 import itertools
 from fractions import Fraction
-from t_space_utils import convert_t_to_q, convert_q_to_t
 
 def infinite_hues():
     yield Fraction(0)

@@ -9,6 +9,8 @@
 #include "drake/geometry/optimization/vpolytope.h"
 #include "drake/multibody/rational_forward_kinematics/generate_monomial_basis_util.h"
 #include "drake/multibody/rational_forward_kinematics/rational_forward_kinematics_internal.h"
+#include "drake/multibody/rational_forward_kinematics/redundant_inequality_pruning.h"
+#include "drake/solvers/mosek_solver.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -56,10 +58,12 @@ void FindMonomialBasisForPolytopicRegion(
   // computed.
   const SortedPair<multibody::BodyIndex> kinematics_chain(
       rational.link_polytope->body_index(), rational.expressed_body_index);
+
   const auto it = map_chain_to_monomial_basis->find(kinematics_chain);
   if (it == map_chain_to_monomial_basis->end()) {
     const auto t_halfchain = rational_forward_kinematics.FindTOnPath(
         rational.link_polytope->body_index(), rational.expressed_body_index);
+
     *monomial_basis_halfchain = GenerateMonomialBasisWithOrderUpToOne(
         drake::symbolic::Variables(t_halfchain));
     map_chain_to_monomial_basis->emplace_hint(
@@ -364,8 +368,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
     const VectorX<symbolic::Polynomial>& t_minus_t_lower,
     const VectorX<symbolic::Polynomial>& t_upper_minus_t,
     const VectorX<symbolic::Monomial>& monomial_basis,
-    // TODO: should we enforce that this basis be sufficient to express the polynomials in
-    // polytope_on_one_side_rational
     const VerificationOption& verification_option,
     const std::vector<bool>& t_lower_needs_lagrangian,
     const std::vector<bool>& t_upper_needs_lagrangian,
@@ -378,19 +380,16 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   lagrangian_upper->resize(t_upper_minus_t.rows());
   *verified_polynomial = polytope_on_one_side_rational.numerator();
   for (int i = 0; i < d_minus_Ct.rows(); ++i) {
-    // TODO(amice): only include the lagranians from the non-redundant inequalities of the polytope. Check this condition in here or pass argument like for the lower and upper?
     (*lagrangian_polytope)(i) =
-        prog->NewNonnegativePolynomial(monomial_basis,
+        prog->NewSosPolynomial(monomial_basis,
                                        verification_option.lagrangian_type)
             .first;
     *verified_polynomial -= (*lagrangian_polytope)(i)*d_minus_Ct(i);
   }
   for (int i = 0; i < t_minus_t_lower.rows(); ++i) {
-    // TODO: Should we not still add the multiplier here and just set it to 0 if its not needed. Because when we adjust
-    // the regions in the bilinear alternation, it may become the case that t-t_lower>= 0 and t_upper-t <=0 becomes relevant again
     if (t_lower_needs_lagrangian[i]) {
       (*lagrangian_lower)(i) =
-          prog->NewNonnegativePolynomial(monomial_basis,
+          prog->NewSosPolynomial(monomial_basis,
                                          verification_option.lagrangian_type)
               .first;
       *verified_polynomial -= (*lagrangian_lower)(i)*t_minus_t_lower(i);
@@ -401,7 +400,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   for (int i = 0; i < t_upper_minus_t.rows(); ++i) {
     if (t_upper_needs_lagrangian[i]) {
       (*lagrangian_upper)(i) =
-          prog->NewNonnegativePolynomial(monomial_basis,
+          prog->NewSosPolynomial(monomial_basis,
                                          verification_option.lagrangian_type)
               .first;
       *verified_polynomial -= (*lagrangian_upper)(i)*t_upper_minus_t(i);
@@ -411,7 +410,7 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
   }
 
   const symbolic::Polynomial verified_polynomial_expected =
-      prog->NewNonnegativePolynomial(monomial_basis,
+      prog->NewSosPolynomial(monomial_basis,
                                      verification_option.link_polynomial_type)
           .first;
   const symbolic::Polynomial poly_diff{*verified_polynomial -
@@ -422,7 +421,6 @@ void AddNonnegativeConstraintForPolytopeOnOneSideOfPlane(
 }
 }  // namespace
 
-// TODO: how is this different from the ContructLagranianProblem method?
 CspaceFreeRegion::CspacePolytopeProgramReturn
 CspaceFreeRegion::ConstructProgramForCspacePolytope(
     const Eigen::Ref<const Eigen::VectorXd>& q_star,
@@ -646,8 +644,8 @@ CspaceFreeRegion::ConstructLagrangianProgram(
     const VectorX<symbolic::Variable>& separating_plane_vars,
     const Eigen::Ref<const Eigen::VectorXd>& t_lower,
     const Eigen::Ref<const Eigen::VectorXd>& t_upper,
-    const VerificationOption& option, MatrixX<symbolic::Variable>* P,
-    VectorX<symbolic::Variable>* q) const {
+    const VerificationOption& option, std::optional<double> redundant_tighten,
+    MatrixX<symbolic::Variable>* P, VectorX<symbolic::Variable>* q) const {
   // TODO(hongkai.dai): support more nonnegative polynomials.
   if (option.lagrangian_type !=
       solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
@@ -676,6 +674,14 @@ CspaceFreeRegion::ConstructLagrangianProgram(
   VectorX<symbolic::Polynomial> t_upper_minus_t(t.rows());
   ConstructTBoundsPolynomial(t_monomials, t_lower, t_upper, &t_minus_t_lower,
                              &t_upper_minus_t);
+  // find the redundant inequalities.
+  std::unordered_set<int> C_redundant_indices, t_lower_redundant_indices,
+      t_upper_redundant_indices;
+  if (redundant_tighten.has_value()) {
+    FindRedundantInequalities(C, d, t_lower, t_upper, redundant_tighten.value(),
+                              &C_redundant_indices, &t_lower_redundant_indices,
+                              &t_upper_redundant_indices);
+  }
   // For each rational numerator, add the constraint that the Lagrangian
   // polynomials >= 0, and the verified polynomial >= 0.
   //
@@ -695,37 +701,52 @@ CspaceFreeRegion::ConstructLagrangianProgram(
     }
     MatrixX<symbolic::Variable>& gram_mat = it->second;
 
-    // This lambda does three things.
+    // This lambda does these things.
+    // If redundant = False, namely this constraint is not redundant, then
     // 1. Compute the Gram matrix.
     // 2. Constraint the Gram matrix to be PSD.
     // 3. subtract lagrangian(t) * constraint_polynomial from
     // verified_polynomial.
+    // If redundant = True, then
+    // 1. Set the Gram variables to be 0.
     auto constrain_lagrangian =
         [&gram_mat, &verified_polynomial, &lagrangian_gram_vars, &prog,
          gram_lower_size](int lagrangian_gram_lower_start,
                           const VectorX<symbolic::Monomial>& monomial_basis,
-                          const symbolic::Polynomial& constraint_polynomial) {
-          SymmetricMatrixFromLower<symbolic::Variable>(
-              gram_mat.rows(),
-              lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
-                                           gram_lower_size),
-              &gram_mat);
-          prog->AddPositiveSemidefiniteConstraint(gram_mat);
-          verified_polynomial -= CalcPolynomialFromGram<symbolic::Variable>(
-                                     monomial_basis, gram_mat) *
-                                 constraint_polynomial;
+                          const symbolic::Polynomial& constraint_polynomial,
+                          bool redundant) {
+          if (redundant) {
+            prog->AddBoundingBoxConstraint(
+                0, 0,
+                lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
+                                             gram_lower_size));
+
+          } else {
+            SymmetricMatrixFromLower<symbolic::Variable>(
+                gram_mat.rows(),
+                lagrangian_gram_vars.segment(lagrangian_gram_lower_start,
+                                             gram_lower_size),
+                &gram_mat);
+            prog->AddPositiveSemidefiniteConstraint(gram_mat);
+            verified_polynomial -= CalcPolynomialFromGram<symbolic::Variable>(
+                                       monomial_basis, gram_mat) *
+                                   constraint_polynomial;
+          }
         };
     // Handle lagrangian l_polytope(t).
     for (int i = 0; i < C.rows(); ++i) {
       constrain_lagrangian(tuple.polytope_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, d_minus_Ct(i));
+                           tuple.monomial_basis, d_minus_Ct(i),
+                           C_redundant_indices.count(i) > 0);
     }
     // Handle lagrangian l_lower(t) and l_upper(t).
     for (int i = 0; i < t.rows(); ++i) {
       constrain_lagrangian(tuple.t_lower_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, t_minus_t_lower(i));
+                           tuple.monomial_basis, t_minus_t_lower(i),
+                           t_lower_redundant_indices.count(i) > 0);
       constrain_lagrangian(tuple.t_upper_lagrangian_gram_lower_start[i],
-                           tuple.monomial_basis, t_upper_minus_t(i));
+                           tuple.monomial_basis, t_upper_minus_t(i),
+                           t_upper_redundant_indices.count(i) > 0);
     }
     // Now constrain that verified_polynomial is non-negative.
     SymmetricMatrixFromLower<symbolic::Variable>(
@@ -762,9 +783,7 @@ CspaceFreeRegion::ConstructPolytopeProgram(
     const VectorX<symbolic::Variable>& separating_plane_vars,
     const VectorX<symbolic::Polynomial>& t_minus_t_lower,
     const VectorX<symbolic::Polynomial>& t_upper_minus_t,
-    const Eigen::MatrixXd& P, const Eigen::VectorXd& q,
-    const VerificationOption& option,
-    VectorX<symbolic::Variable>* margin) const {
+    const VerificationOption& option) const {
   if (option.link_polynomial_type !=
       solvers::MathematicalProgram::NonnegativePolynomial::kSos) {
     throw std::runtime_error("Only support sos polynomial for now");
@@ -793,11 +812,16 @@ CspaceFreeRegion::ConstructPolytopeProgram(
                            &monomial_basis, gram_lower_size](
                               int lagrangian_var_start,
                               const symbolic::Polynomial& constraint) {
-      verified_polynomial -=
-          CalcPolynomialFromGramLower<double>(
-              monomial_basis, lagrangian_gram_var_vals.segment(
-                                  lagrangian_var_start, gram_lower_size)) *
-          constraint;
+      if ((lagrangian_gram_var_vals
+               .segment(lagrangian_var_start, gram_lower_size)
+               .array() != 0)
+              .any()) {
+        verified_polynomial -=
+            CalcPolynomialFromGramLower<double>(
+                monomial_basis, lagrangian_gram_var_vals.segment(
+                                    lagrangian_var_start, gram_lower_size)) *
+            constraint;
+      }
     };
 
     for (int i = 0; i < C.rows(); ++i) {
@@ -831,11 +855,6 @@ CspaceFreeRegion::ConstructPolytopeProgram(
       prog->AddLinearEqualityConstraint(item.second, 0);
     }
   }
-
-  *margin = prog->NewContinuousVariables(C.rows(), "margin");
-  AddOuterPolytope(prog.get(), P, q, C, d, *margin);
-  // margin >= 0.
-  prog->AddBoundingBoxConstraint(0, kInf, *margin);
   return prog;
 }
 
@@ -850,9 +869,16 @@ namespace {
 // @param cost_val is the optimal cost of the optimization program (which
 // minimizes `linear_cost`).
 solvers::MathematicalProgramResult BackoffProgram(
-    solvers::MathematicalProgram* prog,
-    const solvers::Binding<solvers::LinearCost>& linear_cost, double cost_val,
-    double backoff_scale, const solvers::SolverOptions& solver_options) {
+    solvers::MathematicalProgram* prog, double cost_val, double backoff_scale,
+    const solvers::SolverOptions& solver_options) {
+  // The program has no quadratic cost.
+  DRAKE_DEMAND(prog->quadratic_costs().empty());
+  // For the moment, assume the program has only one linear cost.
+  if (prog->linear_costs().size() != 1) {
+    drake::log()->error(
+        "Currently only support program with exactly one linear cost");
+  }
+  const auto linear_cost = prog->linear_costs()[0];
   prog->RemoveCost(linear_cost);
   if (backoff_scale <= 0) {
     throw std::invalid_argument(
@@ -936,7 +962,8 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     auto prog_lagrangian = ConstructLagrangianProgram(
         alternation_tuples, C_val, d_val, lagrangian_gram_vars,
         verified_gram_vars, separating_plane_vars, t_lower, t_upper,
-        verification_option, &P, &q);
+        verification_option, bilinear_alternation_option.redundant_tighten, &P,
+        &q);
     auto [log_det_cost, log_det_t, log_det_Z] =
         prog_lagrangian->AddMaximizeLogDeterminantCost(
             P.cast<symbolic::Expression>());
@@ -947,18 +974,22 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
           fmt::format("Find Lagrangian fails in iter {}", iter_count));
     }
     if (bilinear_alternation_option.verbose) {
-      std::cout << fmt::format("Iter: {}, max(log(det(P)))={}\n", iter_count,
-                               -result_lagrangian.get_optimal_cost());
+      drake::log()->info(fmt::format(
+          "Iter: {}, max(log(det(P)))={}, solver_time {}", iter_count,
+          -result_lagrangian.get_optimal_cost(),
+          result_lagrangian.get_solver_details<solvers::MosekSolver>()
+              .optimizer_time));
     }
     if (bilinear_alternation_option.lagrangian_backoff_scale > 0) {
       result_lagrangian = BackoffProgram(
-          prog_lagrangian.get(), log_det_cost,
-          result_lagrangian.get_optimal_cost(),
+          prog_lagrangian.get(), result_lagrangian.get_optimal_cost(),
           bilinear_alternation_option.lagrangian_backoff_scale, solver_options);
       if (bilinear_alternation_option.verbose) {
-        std::cout << fmt::format(
-            "backoff with log(det(P)) {}\n",
-            -result_lagrangian.EvalBinding(log_det_cost)(0));
+        drake::log()->info(fmt::format(
+            "backoff with log(det(P)) {}, solver time {}",
+            -result_lagrangian.EvalBinding(log_det_cost)(0),
+            result_lagrangian.get_solver_details<solvers::MosekSolver>()
+                .optimizer_time));
       }
     }
     const Eigen::VectorXd lagrangian_gram_var_vals =
@@ -970,15 +1001,27 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     // Update the cost.
     const double log_det_P = std::log(P_sol.determinant());
     cost_improvement = log_det_P - previous_cost;
+    drake::log()->info(fmt::format("cost improvement {}", cost_improvement));
     previous_cost = log_det_P;
 
     // Now solve the polytope problem (fix Lagrangian).
     auto prog_polytope = ConstructPolytopeProgram(
         alternation_tuples, C_var, d_var, d_minus_Ct, lagrangian_gram_var_vals,
         verified_gram_vars, separating_plane_vars, t_minus_t_lower,
-        t_upper_minus_t, P_sol, q_sol, verification_option, &margin);
-    auto prog_polytope_cost = prog_polytope->AddLinearCost(
-        -Eigen::VectorXd::Ones(margin.rows()), 0., margin);
+        t_upper_minus_t, verification_option);
+    // Add the constraint that the polytope contains the ellipsoid
+    margin = prog_polytope->NewContinuousVariables(C_var.rows(), "margin");
+    AddOuterPolytope(prog_polytope.get(), P_sol, q_sol, C_var, d_var, margin);
+    prog_polytope->AddBoundingBoxConstraint(0, kInf, margin);
+
+    // Maximize ∏ᵢ(margin(i) + epsilon), where epsilon is a
+    // small positive number to make sure this geometric mean is always
+    // positive, even when some of margin is 0.
+    prog_polytope->AddMaximizeGeometricMeanCost(
+        Eigen::MatrixXd::Identity(margin.rows(), margin.rows()),
+        Eigen::VectorXd::Constant(margin.rows(), 1E-5), margin);
+    // TODO(hongkai.dai): remove this line when the Drake PR 16373 is merged.
+    auto prog_polytope_cost = prog_polytope->linear_costs()[0];
     auto result_polytope =
         solvers::Solve(*prog_polytope, std::nullopt, solver_options);
     if (!result_polytope.is_success()) {
@@ -987,18 +1030,22 @@ void CspaceFreeRegion::CspacePolytopeBilinearAlternation(
     }
 
     if (bilinear_alternation_option.verbose) {
-      std::cout << fmt::format("Iter: {}, polytope step cost {}\n", iter_count,
-                               result_polytope.get_optimal_cost());
+      drake::log()->info(
+          fmt::format("Iter: {}, polytope step cost {}, solver time {}",
+                      iter_count, result_polytope.get_optimal_cost(),
+                      result_polytope.get_solver_details<solvers::MosekSolver>()
+                          .optimizer_time));
     }
     if (bilinear_alternation_option.polytope_backoff_scale > 0) {
       result_polytope = BackoffProgram(
-          prog_polytope.get(), prog_polytope_cost,
-          result_polytope.get_optimal_cost(),
+          prog_polytope.get(), result_polytope.get_optimal_cost(),
           bilinear_alternation_option.polytope_backoff_scale, solver_options);
       if (bilinear_alternation_option.verbose) {
-        std::cout << fmt::format(
-            "back off, cost: {}\n",
-            result_polytope.EvalBinding(prog_polytope_cost)(0));
+        drake::log()->info(fmt::format(
+            "back off, cost: {}, solver time {}",
+            result_polytope.EvalBinding(prog_polytope_cost)(0),
+            result_polytope.get_solver_details<solvers::MosekSolver>()
+                .optimizer_time));
       }
     }
     C_val = result_polytope.GetSolution(C_var);
@@ -1017,10 +1064,9 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
     const BinarySearchOption& binary_search_option,
     const solvers::SolverOptions& solver_options,
     Eigen::VectorXd* d_final) const {
-  // TODO (amice): This method tries to find the maximum expansion of the polytope. I tried to find the minimal tightening
-  // of the polytope. Could try both: If initial region C t <= d_init infeasible then look for d_init-var_epsilon
-  // and search until either empty/region is too small and verified. If initial reagion is feasible then try to grow
-  // d_init + var_epsilon
+  // The polytope region is C * t <= d_without_epsilon + epsilon. We might
+  // change d_without_epsilon during the binary search process.
+  Eigen::VectorXd d_without_epsilon = d_init;
   const int C_rows = C.rows();
   DRAKE_DEMAND(d_init.rows() == C_rows);
   DRAKE_DEMAND(C.cols() == rational_forward_kinematics_.t().rows());
@@ -1036,60 +1082,101 @@ void CspaceFreeRegion::CspacePolytopeBinarySearch(
       &d_minus_Ct, &t_lower, &t_upper, &t_minus_t_lower, &t_upper_minus_t,
       &C_var, &d_var, &lagrangian_gram_vars, &verified_gram_vars,
       &separating_plane_vars);
+  DRAKE_DEMAND(binary_search_option.epsilon_min >=
+               FindEpsilonLower(t_lower, t_upper, C, d_init));
 
   VerificationOption verification_option{};
   // Checks if C*t<=d, t_lower<=t<=t_upper is collision free.
+  // Update d_final = d if the program C*t<=d, t_lower <= t <= t_upper is
+  // collision free.
   auto is_polytope_collision_free =
       [this, &alternation_tuples, &C, &lagrangian_gram_vars,
        &verified_gram_vars, &separating_plane_vars, &t_lower, &t_upper,
-       &verification_option, &solver_options](const Eigen::VectorXd& d) {
+       &verification_option, &solver_options, &C_var, &d_var, &d_minus_Ct,
+       &t_minus_t_lower, &t_upper_minus_t](
+          const Eigen::VectorXd& d, bool search_d, Eigen::VectorXd* d_sol) {
+        const double redundant_tighten = 0.;
         auto prog = this->ConstructLagrangianProgram(
             alternation_tuples, C, d, lagrangian_gram_vars, verified_gram_vars,
             separating_plane_vars, t_lower, t_upper, verification_option,
-            nullptr, nullptr);
-        // Now add the constraint that C*t<=d , t_lower <= t <= t_upper is not
-        // empty. We find t_nominal satisfying these constraints.
-        const auto t_nominal = prog->NewContinuousVariables(
-            rational_forward_kinematics_.t().rows());
-        prog->AddLinearConstraint(C, Eigen::VectorXd::Constant(d.rows(), -kInf),
-                                  d, t_nominal);
-        prog->AddBoundingBoxConstraint(t_lower, t_upper, t_nominal);
-
+            redundant_tighten, nullptr, nullptr);
         const auto result = solvers::Solve(*prog, std::nullopt, solver_options);
+        if (result.is_success()) {
+          *d_sol = d;
+          if (search_d) {
+            // Now fix the Lagrangian and C, and search for d.
+            const auto lagrangian_gram_var_vals =
+                result.GetSolution(lagrangian_gram_vars);
+            auto prog_polytope = this->ConstructPolytopeProgram(
+                alternation_tuples, C_var, d_var, d_minus_Ct,
+                lagrangian_gram_var_vals, verified_gram_vars,
+                separating_plane_vars, t_minus_t_lower, t_upper_minus_t,
+                verification_option);
+            prog_polytope->AddBoundingBoxConstraint(C, C, C_var);
+            // d_var >= d
+            prog_polytope->AddBoundingBoxConstraint(
+                d, Eigen::VectorXd::Constant(d.rows(), kInf), d_var);
+            // maximize d_var.
+            prog_polytope->AddLinearCost(-Eigen::VectorXd::Ones(d_var.rows()),
+                                         0, d_var);
+            const auto result_polytope =
+                solvers::Solve(*prog_polytope, std::nullopt, solver_options);
+            if (result_polytope.is_success()) {
+              *d_sol = result_polytope.GetSolution(d_var);
+            }
+          }
+        }
+        drake::log()->info(fmt::format(
+            "Solver time {}",
+            result.get_solver_details<solvers::MosekSolver>().optimizer_time));
         return result.is_success();
       };
-  if (is_polytope_collision_free(d_init +
-                                 binary_search_option.epsilon_max *
-                                     Eigen::VectorXd::Ones(d_init.rows()))) {
-    *d_final = d_init + binary_search_option.epsilon_max *
-                            Eigen::VectorXd::Ones(d_init.rows());
+  if (is_polytope_collision_free(
+          d_without_epsilon +
+              binary_search_option.epsilon_max *
+                  Eigen::VectorXd::Ones(d_without_epsilon.rows()),
+          binary_search_option.search_d, d_final)) {
     return;
   }
-  if (!is_polytope_collision_free(d_init +
-                                  binary_search_option.epsilon_min *
-                                      Eigen::VectorXd::Ones(d_init.rows()))) {
+  if (!is_polytope_collision_free(
+          d_without_epsilon +
+              binary_search_option.epsilon_min *
+                  Eigen::VectorXd::Ones(d_without_epsilon.rows()),
+          false /* don't search for d */, d_final)) {
     throw std::runtime_error(
         fmt::format("binary search: the initial epsilon {} is infeasible",
                     binary_search_option.epsilon_min));
   }
   double eps_max = binary_search_option.epsilon_max;
   double eps_min = binary_search_option.epsilon_min;
-  while (eps_max - eps_min > binary_search_option.epsilon_tol) {
+  int iter_count = 0;
+  while (iter_count < binary_search_option.max_iters) {
     const double eps = (eps_max + eps_min) / 2;
     const Eigen::VectorXd d =
-        d_init + eps * Eigen::VectorXd::Ones(d_init.rows());
-    const bool is_feasible = is_polytope_collision_free(d);
+        d_without_epsilon +
+        eps * Eigen::VectorXd::Ones(d_without_epsilon.rows());
+    const bool is_feasible =
+        is_polytope_collision_free(d, binary_search_option.search_d, d_final);
     if (is_feasible) {
-      std::cout << fmt::format("epsilon={} is feasible\n", eps);
-      eps_min = eps;
+      drake::log()->info(fmt::format("epsilon={} is feasible", eps));
+      // Now we need to reset d_without_epsilon. The invariance we want is that
+      // C*t<= d_without_epsilon + eps_min * 𝟏 is collision free, while C*t <=
+      // d_without_epsilon + eps_max * 𝟏 is not feasible with SOS. We know that
+      // d_final + 0 * 𝟏 is collision free. Also (d_without_epsilon + eps_max *
+      // 𝟏) is not. So we set d_without_epsilon to d_final, and update eps_min
+      // and eps_max accordingly.
+      eps_max = (d_without_epsilon +
+                 eps_max * Eigen::VectorXd::Ones(d.rows(), 1) - *d_final)
+                    .maxCoeff();
+      d_without_epsilon = *d_final;
+      eps_min = 0;
+      drake::log()->info(
+          fmt::format("reset eps_min={}, eps_max={}", eps_min, eps_max));
     } else {
-      std::cout << fmt::format("epsilon={} is infeasible\n", eps);
+      drake::log()->info(fmt::format("epsilon={} is infeasible", eps));
       eps_max = eps;
     }
-    // TODO: we can do better than this. From a certificate of collision-free we can then maximize/minimize eps from the proof
-    // of collision freeness. This introduces a bilinear alternation which is why I said the problem is not quasi-convex
-    // this is much better than uniform expansions.
-    *d_final = d;
+    iter_count++;
   }
 }
 
@@ -1377,6 +1464,62 @@ std::map<BodyIndex, std::vector<ConvexPolytope>> GetConvexPolytopes(
     }
   }
   return ret;
+}
+
+void FindRedundantInequalities(
+    const Eigen::MatrixXd& C, const Eigen::VectorXd& d,
+    const Eigen::VectorXd& t_lower, const Eigen::VectorXd& t_upper,
+    double tighten, std::unordered_set<int>* C_redundant_indices,
+    std::unordered_set<int>* t_lower_redundant_indices,
+    std::unordered_set<int>* t_upper_redundant_indices) {
+  C_redundant_indices->clear();
+  t_lower_redundant_indices->clear();
+  t_upper_redundant_indices->clear();
+  // We aggregate the constraint {C*t<=d, t_lower <= t <= t_upper} as C̅t ≤ d̅
+  const int nt = t_lower.rows();
+  Eigen::MatrixXd C_bar(C.rows() + 2 * nt, nt);
+  Eigen::VectorXd d_bar(d.rows() + 2 * nt);
+  C_bar << C, Eigen::MatrixXd::Identity(nt, nt),
+      -Eigen::MatrixXd::Identity(nt, nt);
+  d_bar << d, t_upper, -t_lower;
+  const std::vector<int> redundant_indices =
+      FindRedundantInequalitiesInHPolyhedronByIndex(C_bar, d_bar, tighten);
+  C_redundant_indices->reserve(redundant_indices.size());
+  t_lower_redundant_indices->reserve(redundant_indices.size());
+  t_upper_redundant_indices->reserve(redundant_indices.size());
+  for (const int index : redundant_indices) {
+    if (index < C.rows()) {
+      C_redundant_indices->emplace_hint(C_redundant_indices->end(), index);
+    } else if (index < C.rows() + nt) {
+      t_upper_redundant_indices->emplace_hint(t_upper_redundant_indices->end(),
+                                              index - C.rows());
+    } else {
+      t_lower_redundant_indices->emplace_hint(t_lower_redundant_indices->end(),
+                                              index - C.rows() - nt);
+    }
+  }
+}
+
+double FindEpsilonLower(const Eigen::Ref<const Eigen::VectorXd>& t_lower,
+                        const Eigen::Ref<const Eigen::VectorXd>& t_upper,
+                        const Eigen::Ref<const Eigen::MatrixXd>& C,
+                        const Eigen::Ref<const Eigen::VectorXd>& d) {
+  solvers::MathematicalProgram prog{};
+  const int nt = t_lower.rows();
+  const auto t = prog.NewContinuousVariables(nt, "t");
+  const auto epsilon = prog.NewContinuousVariables<1>("epsilon");
+  // Add the constraint C*t<=d+epsilon and t_lower <= t <= t_upper.
+  Eigen::MatrixXd A(C.rows(), nt + 1);
+  A.leftCols(nt) = C;
+  A.rightCols<1>() = -Eigen::VectorXd::Ones(C.rows());
+  prog.AddLinearConstraint(A, Eigen::VectorXd::Constant(C.rows(), -kInf), d,
+                           {t, epsilon});
+  prog.AddBoundingBoxConstraint(t_lower, t_upper, t);
+  // minimize epsilon.
+  prog.AddLinearCost(Vector1d(1), 0, epsilon);
+  const auto result = solvers::Solve(prog);
+  DRAKE_DEMAND(result.is_success());
+  return result.get_optimal_cost();
 }
 
 // Explicit instantiation.
