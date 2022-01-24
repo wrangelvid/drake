@@ -113,10 +113,11 @@ class RRTIRIS:
 
     def run(self, n_it):
         for it in range(n_it):
-            print(it)
+            #print(it)
             pos_samp = self.sample_node_pos()
             seed_point, min_dist, closest_points, nearest_id = self.get_closest_point_in_regions(pos_samp) 
-            print('[RRT IRIS] Pos_samp', pos_samp, ' seed ', seed_point, ' dist ', min_dist)
+            if self.verbose:
+                print('[RRT IRIS] Pos_samp', pos_samp, ' seed ', seed_point, ' dist ', min_dist)
             self.seed_points.append(seed_point)
             self.out_set_seed_points.append(pos_samp)
             
