@@ -63,9 +63,13 @@ void FindMonomialBasisForPolytopicRegion(
   if (it == map_chain_to_monomial_basis->end()) {
     const auto t_halfchain = rational_forward_kinematics.FindTOnPath(
         rational.link_polytope->body_index(), rational.expressed_body_index);
-
-    *monomial_basis_halfchain = GenerateMonomialBasisWithOrderUpToOne(
-        drake::symbolic::Variables(t_halfchain));
+    if (t_halfchain.rows() > 0) {
+      *monomial_basis_halfchain = GenerateMonomialBasisWithOrderUpToOne(
+          drake::symbolic::Variables(t_halfchain));
+    } else {
+      *monomial_basis_halfchain =
+          Vector1<symbolic::Monomial>(symbolic::Monomial());
+    }
     map_chain_to_monomial_basis->emplace_hint(
         it, std::make_pair(kinematics_chain, *monomial_basis_halfchain));
   } else {
@@ -150,15 +154,30 @@ CspaceFreeRegion::CspaceFreeRegion(
   for (const auto& [link1, polytopes1] : polytope_geometries_) {
     for (const auto& [link2, polytopes2] : polytope_geometries_) {
       if (link1 < link2) {
-        // link_collision_pairs stores all the pair of collision geometry on
+                // link_collision_pairs stores all the pair of collision geometry on
         // (link1, link2).
         std::vector<std::pair<const ConvexPolytope*, const ConvexPolytope*>>
             link_collision_pairs;
+        // I need to check if the kinematics chain betwen link 1 and link 2 has
+        // length 0.
+        std::optional<bool> chain_has_length_zero;
         for (const auto& polytope1 : polytopes1) {
           for (const auto& polytope2 : polytopes2) {
             if (!model_inspector.CollisionFiltered(polytope1.get_id(),
                                                    polytope2.get_id())) {
+              if (!chain_has_length_zero.has_value()) {
+                chain_has_length_zero =
+                    rational_forward_kinematics_.FindTOnPath(link1, link2)
+                        .rows() == 0;
+                if (chain_has_length_zero.value()) {
+                  throw std::runtime_error(fmt::format(
+                      "No joint on the kinematic chain from link {} to {}",
+                      plant->get_body(link1).name(),
+                      plant->get_body(link2).name()));
+                }
+              }
               num_collision_pairs++;
+
               link_collision_pairs.emplace_back(&polytope1, &polytope2);
             }
           }
