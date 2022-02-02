@@ -175,13 +175,26 @@ class IrisPlantVisualizer:
         t = self.forward_kin.ComputeTValue(q, self.q_star)
         self.showres(q)
         if self.region_to_collision_pair_to_plane_dictionary is not None:
-            for region, collision_pair_to_plane_dictionary in self.region_to_collision_pair_to_plane_dictionary.items():
+            for region_id, (region, collision_pair_to_plane_dictionary) in enumerate(self.region_to_collision_pair_to_plane_dictionary.items()):
                 if region.PointInSet(t):
                     colors = viz_utils.n_colors(len(collision_pair_to_plane_dictionary.keys()))
                     for i, (pair, planes) in enumerate(collision_pair_to_plane_dictionary.items()):
                         geomA, geomB = pair[0], pair[1]
                         self.plot_plane_geom_id(geomA, geomB, collision_pair_to_plane_dictionary, t, color=colors[i],
-                                                region_name=f"region {i}")
+                                                region_name=f"region {region_id}")
+
+    def show_res_with_planes_gid(self, q, gid):
+        t = self.forward_kin.ComputeTValue(q, self.q_star)
+        self.showres(q)
+        if self.region_to_collision_pair_to_plane_dictionary is not None:
+            for region_id, (region, collision_pair_to_plane_dictionary) in enumerate(self.region_to_collision_pair_to_plane_dictionary.items()):
+                if region.PointInSet(t):
+                    colors = viz_utils.n_colors(len(collision_pair_to_plane_dictionary.keys()))
+                    for i, (pair, planes) in enumerate(collision_pair_to_plane_dictionary.items()):
+                        geomA, geomB = pair[0], pair[1]
+                        if geomA == gid or geomB == gid: 
+                            self.plot_plane_geom_id(geomA, geomB, collision_pair_to_plane_dictionary, t, color=colors[i],
+                                                    region_name=f"region {region_id}")
 
     def plot_plane_geom_id(self, geomA, geomB, planes_dict, cur_t, color=(0, 0, 0), region_name = ''):
         verts_tf, p1, p2 = self.transform_plane_geom_id(geomA, geomB, planes_dict, cur_t)

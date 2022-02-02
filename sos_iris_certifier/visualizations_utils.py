@@ -328,10 +328,10 @@ def plot_regions(vis, regions, ellipses = None, region_suffix='', opacity = 0.5)
         c = colors[i]
         mat = meshcat.geometry.MeshLambertMaterial(color=rgb_to_hex(c), wireframe=False)
         mat.opacity = opacity
-        # plot_3d_poly(region=region,
-        #                   vis=vis['iris']['regions'+region_suffix],
-        #                   name=str(i),
-        #                   mat=mat)
+        #plot_3d_poly(region=region,
+        #                  vis=vis['iris']['regions'+region_suffix],
+        #                  name=str(i),
+        #                  mat=mat)
         plot_3d_poly_marchingcubes(region=region,
                             resolution=30,
                             vis=vis['iris']['regions'+region_suffix],
