@@ -35,6 +35,7 @@ drake_cc_package_library(
         ":propeller",
         ":tamsi_solver",
         ":wing",
+        ":slenderbody",
     ],
 )
 
@@ -313,6 +314,17 @@ drake_cc_library(
         ":multibody_plant_core",
     ],
 )
+
+drake_cc_library(
+    name = "slenderbody",
+    srcs = ["slender_body.cc"],
+    hdrs = ["slender_body.h"],
+    deps = [
+        ":multibody_plant_core",
+    ],
+)
+
+
 
 drake_cc_library(
     name = "multibody_plant_config",
