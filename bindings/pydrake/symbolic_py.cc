@@ -19,6 +19,7 @@
 #include "drake/common/symbolic/monomial_util.h"
 #include "drake/common/symbolic/replace_bilinear_terms.h"
 #include "drake/common/symbolic/trigonometric_polynomial.h"
+#include "drake/common/symbolic/simplification.h"
 
 namespace drake {
 namespace pydrake {
@@ -687,6 +688,18 @@ PYBIND11_MODULE(symbolic, m) {
           &symbolic::positive_semidefinite),
       py::arg("m"), doc.positive_semidefinite.doc_1args_m);
 
+  using simplification::RewritingRule;
+  using Pattern = symbolic::Expression;
+  py:class_<RewritingRule>(m, "RewritingRule", "")
+      .def(py::init<Pattern, Pattern>(), py::arg("lhs"), py::arg("rhs"), "")
+      .def(py::init<const RewritingRule&>(), "")
+      .def("lhs", &RewritingRule::lhs, "")
+      .def("rhs", &RewritingRule::rhs, "");
+
+  m.def("MakeRuleRewriter",
+      &simplificaiton::MakeRuleRewriter,
+      py::arg("r"), "");
+   
   // TODO(m-chaturvedi) Add Pybind11 documentation for operator overloads, etc.
   py::class_<Monomial>(m, "Monomial", doc.Monomial.doc)
       .def(py::init<>(), doc.Monomial.ctor.doc_0args)
