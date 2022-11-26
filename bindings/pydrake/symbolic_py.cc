@@ -688,16 +688,16 @@ PYBIND11_MODULE(symbolic, m) {
           &symbolic::positive_semidefinite),
       py::arg("m"), doc.positive_semidefinite.doc_1args_m);
 
-  using simplification::RewritingRule;
+  using symbolic::RewritingRule;
   using Pattern = symbolic::Expression;
-  py:class_<RewritingRule>(m, "RewritingRule", "")
+  py::class_<RewritingRule>(m, "RewritingRule", "")
       .def(py::init<Pattern, Pattern>(), py::arg("lhs"), py::arg("rhs"), "")
       .def(py::init<const RewritingRule&>(), "")
       .def("lhs", &RewritingRule::lhs, "")
       .def("rhs", &RewritingRule::rhs, "");
 
   m.def("MakeRuleRewriter",
-      &simplificaiton::MakeRuleRewriter,
+      &symbolic::MakeRuleRewriter,
       py::arg("r"), "");
    
   // TODO(m-chaturvedi) Add Pybind11 documentation for operator overloads, etc.
