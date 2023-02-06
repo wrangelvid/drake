@@ -8,6 +8,7 @@
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
 #include "drake/planning/trajectory_optimization/direct_collocation.h"
 #include "drake/planning/trajectory_optimization/direct_transcription.h"
+#include "drake/planning/trajectory_optimization/gcs_trajectory_optimization.h"
 #include "drake/planning/trajectory_optimization/kinematic_trajectory_optimization.h"
 
 namespace drake {
@@ -346,6 +347,55 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("AddPathLengthCost", &Class::AddPathLengthCost,
             py::arg("weight") = 1.0, py::arg("use_conic_constraint") = false,
             cls_doc.AddPathLengthCost.doc);
+  }
+
+  // GCSTrajectoryOptimizationConstructor
+  {
+    const auto& cls_doc = doc.GCSTrajectoryOptimizationConstructor;
+    py::class_<GCSTrajectoryOptimizationConstructor> bezier_gcs_constructor(
+        m, "GCSTrajectoryOptimizationConstructor", cls_doc.doc);
+    bezier_gcs_constructor.def(py::init<>(), cls_doc.ctor.doc)
+        .def_readwrite("order", &GCSTrajectoryOptimizationConstructor::order,
+            cls_doc.order.doc)
+        .def_readwrite("d_max", &GCSTrajectoryOptimizationConstructor::d_max,
+            cls_doc.d_max.doc)
+        .def_readwrite("d_min", &GCSTrajectoryOptimizationConstructor::d_min,
+            cls_doc.d_min.doc)
+        .def("__repr__", [](const GCSTrajectoryOptimizationConstructor& self) {
+          return py::str(
+              "GCSTrajectoryOptimizationConstructor("
+              "order={}, "
+              "d_max={}, "
+              "d_min={}, "
+              ")")
+              .format(self.order, self.d_max, self.d_min);
+        });
+  }
+
+  {
+    using Class = GCSTrajectoryOptimization;
+    constexpr auto& cls_doc = doc.GCSTrajectoryOptimization;
+    py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
+        .def(py::init<const std::vector<HPolyhedron>&,
+                 const GCSTrajectoryOptimizationConstructor&>(),
+            py::arg("regions"),
+            py::arg("constructor") = GCSTrajectoryOptimizationConstructor(), "")
+        .def("num_positions", &Class::num_positions, cls_doc.num_positions.doc)
+        .def("GetGraphvizString", &Class::GetGraphvizString,
+            py::arg("show_slacks") = true, py::arg("precision") = 3,
+            py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
+        .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
+            cls_doc.AddTimeCost.doc)
+        .def("AddPathLengthCost", &Class::AddPathLengthCost,
+            py::arg("weight") = 1.0, cls_doc.AddPathLengthCost.doc)
+        .def("AddPathEnergyCost", &Class::AddPathEnergyCost,
+            py::arg("weight") = 1.0, cls_doc.AddPathEnergyCost.doc)
+        .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
+            py::arg("ub"), cls_doc.AddVelocityBounds.doc)
+        .def("AddSourceTarget", &Class::AddSourceTarget, py::arg("source"),
+            py::arg("target"), cls_doc.AddSourceTarget.doc)
+        .def("SolvePath", &Class::SolvePath, py::arg("options"),
+            cls_doc.SolvePath.doc);
   }
 }
 

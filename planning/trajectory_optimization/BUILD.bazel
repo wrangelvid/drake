@@ -18,6 +18,7 @@ drake_cc_package_library(
         ":kinematic_trajectory_optimization",
         ":multiple_shooting",
         ":sequential_expression_manager",
+        ":gcs_trajectory_optimization",
     ],
 )
 
@@ -97,6 +98,17 @@ drake_cc_library(
         "//math:matrix_util",
         "//solvers:mathematical_program",
         "//solvers:mathematical_program_result",
+    ],
+)
+
+drake_cc_library(
+    name = "gcs_trajectory_optimization",
+    srcs = ["gcs_trajectory_optimization.cc"],
+    hdrs = ["gcs_trajectory_optimization.h"],
+    deps = [
+       "//common",
+       "//common/trajectories:bspline_trajectory",
+       "//geometry/optimization:graph_of_convex_sets", 
     ],
 )
 
