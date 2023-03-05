@@ -2,6 +2,7 @@
 
 #include "drake/common/pointer_cast.h"
 #include "drake/common/symbolic/decompose.h"
+#include "drake/geometry/optimization/cartesian_product.h"
 #include "drake/geometry/optimization/hpolyhedron.h"
 #include "drake/geometry/optimization/point.h"
 #include "drake/math/matrix_util.h"
@@ -12,6 +13,7 @@ namespace trajectory_optimization {
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
+using geometry::optimization::CartesianProduct;
 using geometry::optimization::HPolyhedron;
 using geometry::optimization::Point;
 using math::BsplineBasis;
@@ -36,30 +38,17 @@ using geometry::optimization::GraphOfConvexSetsOptions;
 const double inf = std::numeric_limits<double>::infinity();
 
 GCSTrajectoryOptimization::GCSTrajectoryOptimization(
-    const std::vector<HPolyhedron>& regions,
     const GCSTrajectoryOptimizationConstructor& constructor)
-    : regions_(regions),
-      constructor_(constructor),
-      num_positions_(regions[0].ambient_dimension()) {
+    : constructor_(constructor) {
   DRAKE_DEMAND(constructor_.order > 0);
-
-  for (const auto& region : regions_) {
-    DRAKE_DEMAND(region.ambient_dimension() == num_positions());
-  }
-
-  // Add Regions with time scaling set.
+  // Make time scaling set.
   MatrixXd A_time(2, 1);
   A_time.row(0) = MatrixXd::Identity(1, 1);
   A_time.row(1) = -MatrixXd::Identity(1, 1);
   VectorXd b_time = -constructor_.d_min * VectorXd::Ones(2);
   b_time(0) = constructor_.d_max;
 
-  const HPolyhedron time_scaling_set = HPolyhedron(A_time, b_time);
-
-  for (const auto& region : regions_) {
-    gcs_.AddVertex(region.CartesianPower(constructor_.order + 1)
-                       .CartesianProduct(time_scaling_set));
-  };
+  time_scaling_set_ = HPolyhedron(A_time, b_time);
 
   // Formulate edge costs and constraints.
   auto u_control = MakeMatrixContinuousVariable(num_positions(),
@@ -90,7 +79,6 @@ GCSTrajectoryOptimization::GCSTrajectoryOptimization(
       EigenToStdVector<Expression>(v_control.cast<Expression>()));
 
   // Zeroth order continuity constraints.
-
   const Eigen::VectorX<Expression> path_continuity_error =
       v_r_trajectory.control_points().front() -
       u_r_trajectory_.control_points().back();
@@ -99,28 +87,158 @@ GCSTrajectoryOptimization::GCSTrajectoryOptimization(
 
   auto path_continuity_constraint = std::make_shared<LinearEqualityConstraint>(
       M, VectorXd::Zero(num_positions()));
+  continuity_constraint_.push_back(path_continuity_constraint);
+}
+
+void GCSTrajectoryOptimization::AddSubgraph(
+    const std::vector<HPolyhedron>& regions, const std::string& name) {
+  // TODO(wrangelvid): Allow for custom edge variables.
+  // TODO(wrangelvid): Add full-dimension overlap graph generation.
+  //  Check if region with name already exists.
+  DRAKE_DEMAND(subgraphs_.find(name) == subgraphs_.end());
+
+  // Make sure all regions have the same ambient dimension.
+  for (const auto& region : regions) {
+    DRAKE_DEMAND(region.ambient_dimension() == num_positions());
+  }
+
+  // Add Regions with time scaling set.
+  std::vector<Vertex*> subgraph_vertices;
+  int vertex_count = 0;
+  for (const auto& region : regions) {
+    subgraph_vertices.push_back(
+        gcs_.AddVertex(region.CartesianPower(constructor_.order + 1)
+                           .CartesianProduct(time_scaling_set_),
+                       name + ": " + std::to_string(vertex_count)));
+    is_source_[subgraph_vertices.back()->id()] = false;
+    vertex_count++;
+  }
+
   // Check for overlap between regions.
-  auto vertices = gcs_.Vertices();
-  for (size_t i = 0; i < regions_.size(); i++) {
-    for (size_t j = i + 1; j < regions_.size(); j++) {
-      if (regions_[i].IntersectsWith(regions_[j])) {
+  // TODO(wrangelvid): This is O(n^2) and can be improved.
+  for (size_t i = 0; i < regions.size(); i++) {
+    for (size_t j = i + 1; j < regions.size(); j++) {
+      if (regions[i].IntersectsWith(regions[j])) {
         // Regions are overlapping, add edge.
-        auto u = vertices[i];
-        auto v = vertices[j];
+        auto u = subgraph_vertices[i];
+        auto v = subgraph_vertices[j];
         // Add path continuity constraints.
-        gcs_.AddEdge(u->id(), v->id(), u->name() + " -> " + v->name())
-            ->AddConstraint(Binding<Constraint>(path_continuity_constraint,
-                                                {u->x(), v->x()}));
-        gcs_.AddEdge(v->id(), u->id(), v->name() + " -> " + u->name())
-            ->AddConstraint(Binding<Constraint>(path_continuity_constraint,
-                                                {v->x(), u->x()}));
+        auto uv_edge = gcs_.AddEdge(
+            u->id(), v->id(), u->name() + " -> " + v->name());
+        auto vu_edge = gcs_.AddEdge(
+            v->id(), u->id(), v->name() + " -> " + u->name());
+
+        // Add path continuity constraints.
+        for (const auto& path_continuity_constraint : continuity_constraint_) {
+          uv_edge->AddConstraint(Binding<Constraint>(path_continuity_constraint,
+                                                     {u->x(), v->x()}));
+          vu_edge->AddConstraint(Binding<Constraint>(path_continuity_constraint,
+                                                     {v->x(), u->x()}));
+        }
+        // TODO(wrangelvid): Add other cost and constraints to the edge. if it
+        // hasn't been added yet.
       }
     }
   }
+
+  // Add subgraph to subgraphs.
+  subgraphs_[name] = subgraph_vertices;
+  subgraph_regions_[name] = regions;
+}
+
+VertexId GCSTrajectoryOptimization::AddPoint(
+    const Eigen::Ref<const Eigen::VectorXd>& x, const std::string& from_subgraph,
+    const std::string& to_subgraph) {
+  if (to_subgraph.empty() && from_subgraph.empty()) {
+    throw std::runtime_error(
+        "Either to_subgraph or from_subgraph must be specified.");
+  }
+
+  std::vector<Vertex*> to_subgraph_vertices_containing_point;
+  std::vector<Vertex*> from_subgraph_vertices_containing_point;
+  if (!to_subgraph.empty()) {
+    if (subgraphs_.find(to_subgraph) == subgraphs_.end()) {
+      throw std::runtime_error("Subgraph " + to_subgraph + " does not exist.");
+    } else {
+      // Check if point is in any of the subgraph regions.
+      for (size_t i = 0; i < subgraph_regions_[to_subgraph].size(); i++) {
+        // TODO(wrangelvid): Maybe there is a better way of doing this without
+        //  the need to store the regions.
+        if (subgraph_regions_[to_subgraph][i].PointInSet(x)) {
+          to_subgraph_vertices_containing_point.push_back(
+              subgraphs_[to_subgraph][i]);
+        }
+      }
+      if (to_subgraph_vertices_containing_point.empty()) {
+        throw std::runtime_error(
+            "Point is not in any of the regions of the subgraph " +
+            to_subgraph);
+      }
+    }
+  }
+
+  if (!from_subgraph.empty()) {
+    if (subgraphs_.find(from_subgraph) == subgraphs_.end()) {
+      throw std::runtime_error("Subgraph " + from_subgraph +
+                               " does not exist.");
+    } else {
+      // Check if point is in any of the subgraph regions.
+      for (size_t i = 0; i < subgraph_regions_[from_subgraph].size(); i++) {
+        if (subgraph_regions_[from_subgraph][i].PointInSet(x)) {
+          from_subgraph_vertices_containing_point.push_back(
+              subgraphs_[from_subgraph][i]);
+        }
+      }
+      if (from_subgraph_vertices_containing_point.empty()) {
+        throw std::runtime_error(
+            "Point is not in any of the regions of the subgraph " +
+            from_subgraph);
+      }
+    }
+  }
+
+  // Add point to graph.
+  auto point_vertex =
+      gcs_.AddVertex(CartesianProduct(Point(x), time_scaling_set_));
+
+  // Add edges to subgraph vertices.
+  for (const auto& vertex : to_subgraph_vertices_containing_point) {
+    auto edge = gcs_.AddEdge(
+        point_vertex->id(), vertex->id(),
+        point_vertex->name() + " -> " + to_subgraph + ": " + vertex->name());
+
+    // Match the position of the source and the first control point.
+    for (int j = 0; j < num_positions(); j++) {
+      edge->AddConstraint(edge->xu()[j] == edge->xv()[j]);
+    }
+  }
+  for (const auto& vertex : from_subgraph_vertices_containing_point) {
+    auto edge = gcs_.AddEdge(
+        vertex->id(), point_vertex->id(),
+        from_subgraph + ": " + vertex->name() + " -> " + point_vertex->name());
+
+    // Match the position of the target and the last control point.
+    for (int j = 0; j < num_positions(); j++) {
+      edge->AddConstraint(
+          edge->xu()[num_positions() * constructor_.order + j] ==
+          edge->xv()[j]);
+    }
+
+    // TODO(wrangelvid): Add cost and constraints to the edge if it hasn't been
+    // added yet.
+  }
+
+  if (!to_subgraph.empty()) {
+    is_source_[point_vertex->id()] = true;
+  } else {
+    is_source_[point_vertex->id()] = false;
+  }
+
+  return point_vertex->id();
 }
 
 void GCSTrajectoryOptimization::AddTimeCost(double weight) {
-  // Add time cost to all edges.
+  // The time cost is the sum of duration variables ∑ dᵢ
   Eigen::MatrixXd M(1, u_vars_.size());
   DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_, &M);
   auto time_cost = std::make_shared<LinearCost>(weight * M.row(0), 0.0);
@@ -128,23 +246,22 @@ void GCSTrajectoryOptimization::AddTimeCost(double weight) {
   edge_cost_.push_back(time_cost);
 
   for (const auto& e : gcs_.Edges()) {
-    if (source_ != nullptr && e->u().id() == source_->id()) {
+    if (is_source_[e->u().id()]) {
       continue;
     }
     e->AddCost(Binding<LinearCost>(time_cost, e->xu()));
   }
-  // TODO(wrangelvid): Re add source and target.
 }
 
 void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
   /*
     We will upper bound the path integral by the sum of the distances between
-    the control points. \sum_{i=0}^{n-1} ||r_i - r_{i+1}||_2,
-    where n is the order of the curve.
+    the control points. ∑ ||rᵢ − rᵢ₊₁||₂
 
     In the case of a Bezier curve, the path length is given by the integral of
-    the norm of the derivative of the curve.
-    We can formulate the cost as \sum_{i=0}^{n-1} ||dr_i||_2 / order.
+    the norm of the derivative of the curve. 
+    
+    So the path length cost becomes: ∑ ||ṙᵢ||₂ / order
   */
   auto weight_matrix =
       weight * MatrixXd::Identity(num_positions(), num_positions());
@@ -165,7 +282,7 @@ void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
 
     // Add path length cost to all edges.
     for (auto& edge : gcs_.Edges()) {
-      if (source_ != nullptr && edge->u().id() == source_->id()) {
+      if (is_source_[edge->u().id()]) {
         continue;
       }
       edge->AddCost(Binding<L2NormCost>(path_length_cost, edge->xu()));
@@ -175,7 +292,13 @@ void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
 
 void GCSTrajectoryOptimization::AddPathEnergyCost(double weight) {
   /*
-  TODO(wrangelvid): write some simple doc string here.
+    We will upper bound the path integral by the sum of the distances between
+    the control points. ∑ ||rᵢ − rᵢ₊₁||₂
+
+    In the case of a Bezier curve, the path length is given by the integral of
+    the norm of the derivative of the curve.  ∑ ||ṙᵢ||₂ / order
+
+    So the path energy cost becomes: ∑ ||ṙᵢ||₂ / (order * dᵢ)
   */
   auto sqrt_weight_matrix =
       weight * MatrixXd::Identity(num_positions(), num_positions()).cwiseSqrt();
@@ -200,85 +323,10 @@ void GCSTrajectoryOptimization::AddPathEnergyCost(double weight) {
 
     // Add path length cost to all edges.
     for (auto& edge : gcs_.Edges()) {
-      if (source_ != nullptr && edge->u().id() == source_->id()) {
+      if (is_source_[edge->u().id()]) {
         continue;
       }
       edge->AddCost(Binding<PerspectiveQuadraticCost>(energy_cost, edge->xu()));
-    }
-  }
-}
-
-void GCSTrajectoryOptimization::AddSourceTarget(
-    const Eigen::Ref<const Eigen::VectorXd>& source,
-    const Eigen::Ref<const Eigen::VectorXd>& target) {
-  DRAKE_DEMAND(source.size() == num_positions());
-  DRAKE_DEMAND(target.size() == num_positions());
-
-  // TODO(wrangelvid): add inital/final velocity constraints.
-
-  // Remove existing source and target constraints.
-  if (source_ != nullptr) {
-    gcs_.RemoveVertex(source_->id());
-  }
-  if (target_ != nullptr) {
-    gcs_.RemoveVertex(target_->id());
-  }
-
-  // Add source and target vertices.
-  auto vertices = gcs_.Vertices();
-  source_ = gcs_.AddVertex(Point(source), "source");
-  target_ = gcs_.AddVertex(Point(target), "target");
-
-  // Check if source and target can be connected to the graph.
-  std::vector<int> source_edges_index;
-  std::vector<int> target_edges_index;
-  for (size_t i = 0; i < regions_.size(); i++) {
-    if (regions_[i].PointInSet(source)) {
-      source_edges_index.push_back(i);
-    }
-    if (regions_[i].PointInSet(target)) {
-      target_edges_index.push_back(i);
-    }
-  }
-
-  if (source_edges_index.empty()) {
-    throw std::runtime_error("Source vertex is not connected.");
-  }
-
-  if (target_edges_index.empty()) {
-    throw std::runtime_error("Target vertex is not connected.");
-  }
-
-  // Connect source and target to the graph.
-  for (const auto& i : source_edges_index) {
-    auto edge = gcs_.AddEdge(source_->id(), vertices[i]->id(),
-                             "source -> " + vertices[i]->name());
-
-    // Match the position of the source and the first control point.
-    for (int j = 0; j < num_positions(); j++) {
-      edge->AddConstraint(edge->xu()[j] == edge->xv()[j]);
-    }
-  }
-
-  for (const auto& i : target_edges_index) {
-    auto edge = gcs_.AddEdge(vertices[i]->id(), target_->id(),
-                             vertices[i]->name() + " -> target");
-
-    // Match the position of the target and the last control point.
-    for (int j = 0; j < num_positions(); j++) {
-      edge->AddConstraint(
-          edge->xu()[num_positions() * constructor_.order + j] ==
-          edge->xv()[j]);
-    }
-
-    // Add edge costs.
-    for (const auto& cost : edge_cost_) {
-      edge->AddCost(Binding<Cost>(cost, edge->xu()));
-    }
-
-    // Add edge Constraints.
-    for (const auto& constraint : edge_constraint_) {
-      edge->AddConstraint(Binding<Constraint>(constraint, edge->xu()));
     }
   }
 }
@@ -320,20 +368,19 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
 
     // Add velocity bounds to all edges.
     for (auto& edge : gcs_.Edges()) {
-      if (source_ != nullptr && edge->u().id() == source_->id()) {
+      if (is_source_[edge->u().id()]) {
         continue;
       }
       edge->AddConstraint(
           Binding<LinearConstraint>(velocity_constraint, edge->xu()));
     }
   }
-
-  // TODO(wrangelvid): Re add source and target.
 }
 
 BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
+    VertexId source_id, VertexId target_id,
     const GraphOfConvexSetsOptions& options) {
-  auto result = gcs_.SolveShortestPath(source_->id(), target_->id(), options);
+  auto result = gcs_.SolveShortestPath(source_id, target_id, options);
 
   if (!result.is_success()) {
     throw std::runtime_error("GCS failed to find a path.");
@@ -348,10 +395,9 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
   }
 
   // Extract the path by traversing the graph with a depth first search.
-  std::vector<VertexId> visited_vertex_ids{source_->id()};
-  std::vector<VertexId> path_vertex_ids{source_->id()};
+  std::vector<VertexId> visited_vertex_ids{source_id};
+  std::vector<VertexId> path_vertex_ids{source_id};
   std::vector<Edge*> path_edges{};
-  VertexId target_id = target_->id();
   while (path_vertex_ids.back() != target_id) {
     // Find the edge with the maximum flow from the current node.
     double maximum_flow = 0;

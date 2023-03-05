@@ -361,14 +361,18 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             cls_doc.d_max.doc)
         .def_readwrite("d_min", &GCSTrajectoryOptimizationConstructor::d_min,
             cls_doc.d_min.doc)
+        .def_readwrite("dimension",
+            &GCSTrajectoryOptimizationConstructor::dimension,
+            cls_doc.dimension.doc)
         .def("__repr__", [](const GCSTrajectoryOptimizationConstructor& self) {
           return py::str(
               "GCSTrajectoryOptimizationConstructor("
               "order={}, "
               "d_max={}, "
               "d_min={}, "
+              "dimension={}, "
               ")")
-              .format(self.order, self.d_max, self.d_min);
+              .format(self.order, self.d_max, self.d_min, self.dimension);
         });
   }
 
@@ -376,14 +380,17 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
     using Class = GCSTrajectoryOptimization;
     constexpr auto& cls_doc = doc.GCSTrajectoryOptimization;
     py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
-        .def(py::init<const std::vector<HPolyhedron>&,
-                 const GCSTrajectoryOptimizationConstructor&>(),
-            py::arg("regions"),
+        .def(py::init<const GCSTrajectoryOptimizationConstructor&>(),
             py::arg("constructor") = GCSTrajectoryOptimizationConstructor(), "")
         .def("num_positions", &Class::num_positions, cls_doc.num_positions.doc)
         .def("GetGraphvizString", &Class::GetGraphvizString,
             py::arg("show_slacks") = true, py::arg("precision") = 3,
             py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
+        .def("AddSubgraph", &Class::AddSubgraph, py::arg("regions"),
+            py::arg("name"), cls_doc.AddSubgraph.doc)
+        .def("AddPoint", &Class::AddPoint, py::arg("x"),
+            py::arg("from_subgraph") = "", py::arg("to_subgraph") = "",
+            cls_doc.AddPoint.doc)
         .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
             cls_doc.AddTimeCost.doc)
         .def("AddPathLengthCost", &Class::AddPathLengthCost,
@@ -392,10 +399,8 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             py::arg("weight") = 1.0, cls_doc.AddPathEnergyCost.doc)
         .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
             py::arg("ub"), cls_doc.AddVelocityBounds.doc)
-        .def("AddSourceTarget", &Class::AddSourceTarget, py::arg("source"),
-            py::arg("target"), cls_doc.AddSourceTarget.doc)
-        .def("SolvePath", &Class::SolvePath, py::arg("options"),
-            cls_doc.SolvePath.doc);
+        .def("SolvePath", &Class::SolvePath, py::arg("source_id"),
+            py::arg("target_id"), py::arg("options"), cls_doc.SolvePath.doc);
   }
 }
 
