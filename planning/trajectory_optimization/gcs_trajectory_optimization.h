@@ -98,34 +98,43 @@ class GCSTrajectoryOptimization {
 
   /** Add a point to the graph of convex sets.
   @param x is the position of the point.
-  @param from_subgraph is the name of the subgraph the incoming edges of 
+  @param from_subgraph is the name of the subgraph the incoming edges of
     the point will be added to. For example, if the point is a goal point
     one might leave the to_subgraph empty.
-  @param to_subgraph is the name of the subgraph the outgoing edges of 
+  @param to_subgraph is the name of the subgraph the outgoing edges of
     the point will be added to. For example, if the point is a start point
     one might leave the from_subgraph empty.
 
-  To add a midpoint, one would set both to_subgraph and from_subgraph so that 
+  To add a midpoint, one would set both to_subgraph and from_subgraph so that
   the point is connected to the subgraphs on both sides.
 
   @return the id of the vertex in the graph of convex sets.
   */
   VertexId AddPoint(const Eigen::Ref<const Eigen::VectorXd>& x,
-                const std::string& from_subgraph = "",
-                const std::string& to_subgraph = "");
+                    const std::string& from_subgraph = "",
+                    const std::string& to_subgraph = "");
 
-  /** Adds a linear constraint on the second derivative of the path,
-  `lb` ≤ r̈(s) ≤ `ub`. Note that this does NOT directly constrain q̈(t).
+  /** Adds a minimum time cost to all vertices in a subgraph.
+  The cost is the sum of the time scaling variables of the subgraph.
+
+  @param weight is the relative weight of the cost.
+  @param subgraph is the name of the subgraph the cost will be added to.
+    If the name is empty, the cost will be added to all subgraphs.
   */
-  void AddTimeCost(double weight = 1.0);
+  void AddTimeCost(double weight = 1.0, const std::string& subgraph = "");
 
   /** Adds multiple L2Norm Costs on the upper bound of the path length.
   We upper bound the path integral by the sum of the distances between
   control points. For Bezier curves, this is equivalent to the sum
   of the L2Norm of the derivative control points of the curve divided by the
   order.
+
+  @param weight is the relative weight of the cost.
+  @param subgraph is the name of the subgraph the cost will be added to.
+    If the name is empty, the cost will be added to all subgraphs.
+
   */
-  void AddPathLengthCost(double weight = 1.0);
+  void AddPathLengthCost(double weight = 1.0, const std::string& subgraph = "");
 
   /** Adds multiple Perspective Quadratic Costs on the upper bound of the path
   energy. We upper bound the path integral by the sum of the distances between
@@ -135,15 +144,26 @@ class GCSTrajectoryOptimization {
 
   Note that for the perspective quadratic cost to be convex, the d_min must be
   greater than 0.
-  */
-  void AddPathEnergyCost(double weight = 1.0);
 
-  /** Adds a linear velocity constraints to the entire graph `lb` ≤ q̈(t) ≤ `ub`.
+  @param weight is the relative weight of the cost.
+  @param subgraph is the name of the subgraph the cost will be added to.
+    If the name is empty, the cost will be added to all subgraphs.
+
+  */
+  void AddPathEnergyCost(double weight = 1.0, const std::string& subgraph = "");
+
+  /** Adds a linear velocity constraints to a given subgraph `lb` ≤ q̈(t) ≤ `ub`.
+  @param lb is the lower bound of the velocity.
+  @param ub is the upper bound of the velocity.
+  @param subgraph is the name of the subgraph the constraint will be added to.
+    If the name is empty, the constraint will be added to all subgraphs.
    */
   void AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
-                         const Eigen::Ref<const Eigen::VectorXd>& ub);
+                         const Eigen::Ref<const Eigen::VectorXd>& ub,
+                         const std::string& subgraph = "");
 
-  trajectories::BsplineTrajectory<double> SolvePath(VertexId source_id, VertexId target_id,
+  trajectories::BsplineTrajectory<double> SolvePath(
+      VertexId source_id, VertexId target_id,
       const GraphOfConvexSetsOptions& options);
 
  private:
@@ -155,11 +175,7 @@ class GCSTrajectoryOptimization {
   Vertex* source_{};
   Vertex* target_{};
 
-  std::vector<std::shared_ptr<Cost>> edge_cost_{};
-  std::vector<std::shared_ptr<Constraint>> edge_constraint_{};
   std::vector<std::shared_ptr<Constraint>> continuity_constraint_{};
-
-  std::map<VertexId, bool> is_source_{};
 
   Eigen::VectorX<symbolic::Variable> u_duration_;
   Eigen::VectorX<symbolic::Variable> u_vars_;

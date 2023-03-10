@@ -110,7 +110,6 @@ void GCSTrajectoryOptimization::AddSubgraph(
         gcs_.AddVertex(region.CartesianPower(constructor_.order + 1)
                            .CartesianProduct(time_scaling_set_),
                        name + ": " + std::to_string(vertex_count)));
-    is_source_[subgraph_vertices.back()->id()] = false;
     vertex_count++;
   }
 
@@ -123,10 +122,10 @@ void GCSTrajectoryOptimization::AddSubgraph(
         auto u = subgraph_vertices[i];
         auto v = subgraph_vertices[j];
         // Add path continuity constraints.
-        auto uv_edge = gcs_.AddEdge(
-            u->id(), v->id(), u->name() + " -> " + v->name());
-        auto vu_edge = gcs_.AddEdge(
-            v->id(), u->id(), v->name() + " -> " + u->name());
+        auto uv_edge =
+            gcs_.AddEdge(u->id(), v->id(), u->name() + " -> " + v->name());
+        auto vu_edge =
+            gcs_.AddEdge(v->id(), u->id(), v->name() + " -> " + u->name());
 
         // Add path continuity constraints.
         for (const auto& path_continuity_constraint : continuity_constraint_) {
@@ -135,8 +134,6 @@ void GCSTrajectoryOptimization::AddSubgraph(
           vu_edge->AddConstraint(Binding<Constraint>(path_continuity_constraint,
                                                      {v->x(), u->x()}));
         }
-        // TODO(wrangelvid): Add other cost and constraints to the edge. if it
-        // hasn't been added yet.
       }
     }
   }
@@ -147,8 +144,8 @@ void GCSTrajectoryOptimization::AddSubgraph(
 }
 
 VertexId GCSTrajectoryOptimization::AddPoint(
-    const Eigen::Ref<const Eigen::VectorXd>& x, const std::string& from_subgraph,
-    const std::string& to_subgraph) {
+    const Eigen::Ref<const Eigen::VectorXd>& x,
+    const std::string& from_subgraph, const std::string& to_subgraph) {
   if (to_subgraph.empty() && from_subgraph.empty()) {
     throw std::runtime_error(
         "Either to_subgraph or from_subgraph must be specified.");
@@ -223,44 +220,39 @@ VertexId GCSTrajectoryOptimization::AddPoint(
           edge->xu()[num_positions() * constructor_.order + j] ==
           edge->xv()[j]);
     }
-
-    // TODO(wrangelvid): Add cost and constraints to the edge if it hasn't been
-    // added yet.
-  }
-
-  if (!to_subgraph.empty()) {
-    is_source_[point_vertex->id()] = true;
-  } else {
-    is_source_[point_vertex->id()] = false;
   }
 
   return point_vertex->id();
 }
 
-void GCSTrajectoryOptimization::AddTimeCost(double weight) {
+void GCSTrajectoryOptimization::AddTimeCost(double weight,
+                                            const std::string& subgraph) {
   // The time cost is the sum of duration variables ∑ dᵢ
-  Eigen::MatrixXd M(1, u_vars_.size());
-  DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_, &M);
-  auto time_cost = std::make_shared<LinearCost>(weight * M.row(0), 0.0);
+  auto time_cost =
+      std::make_shared<LinearCost>(weight * Eigen::VectorXd::Ones(1), 0.0);
 
-  edge_cost_.push_back(time_cost);
-
-  for (const auto& e : gcs_.Edges()) {
-    if (is_source_[e->u().id()]) {
+  for (const auto& [name, vertices] : subgraphs_) {
+    if (!subgraph.empty() && name != subgraph) {
+      // If subgraph is not empty, we only add the cost to the specified
+      // subgraph.
       continue;
     }
-    e->AddCost(Binding<LinearCost>(time_cost, e->xu()));
+    for (const auto& v : vertices) {
+      // The duration variable is the last element of the vertex.
+      v->AddCost(Binding<LinearCost>(time_cost, v->x().tail(1)));
+    }
   }
 }
 
-void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
+void GCSTrajectoryOptimization::AddPathLengthCost(double weight,
+                                                  const std::string& subgraph) {
   /*
     We will upper bound the path integral by the sum of the distances between
     the control points. ∑ ||rᵢ − rᵢ₊₁||₂
 
     In the case of a Bezier curve, the path length is given by the integral of
-    the norm of the derivative of the curve. 
-    
+    the norm of the derivative of the curve.
+
     So the path length cost becomes: ∑ ||ṙᵢ||₂ / order
   */
   auto weight_matrix =
@@ -278,19 +270,23 @@ void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
 
     auto path_length_cost = std::make_shared<L2NormCost>(
         weight_matrix * M, Eigen::VectorXd::Zero(num_positions()));
-    edge_cost_.push_back(path_length_cost);
 
-    // Add path length cost to all edges.
-    for (auto& edge : gcs_.Edges()) {
-      if (is_source_[edge->u().id()]) {
+    for (const auto& [name, vertices] : subgraphs_) {
+      if (!subgraph.empty() && name != subgraph) {
+        // If subgraph is not empty, we only add the cost to the specified
+        // subgraph.
         continue;
       }
-      edge->AddCost(Binding<L2NormCost>(path_length_cost, edge->xu()));
+      for (const auto& v : vertices) {
+        // The duration variable is the last element of the vertex.
+        v->AddCost(Binding<L2NormCost>(path_length_cost, v->x()));
+      }
     }
   }
 }
 
-void GCSTrajectoryOptimization::AddPathEnergyCost(double weight) {
+void GCSTrajectoryOptimization::AddPathEnergyCost(double weight,
+                                                  const std::string& subgraph) {
   /*
     We will upper bound the path integral by the sum of the distances between
     the control points. ∑ ||rᵢ − rᵢ₊₁||₂
@@ -319,21 +315,24 @@ void GCSTrajectoryOptimization::AddPathEnergyCost(double weight) {
 
     auto energy_cost = std::make_shared<PerspectiveQuadraticCost>(
         A, Eigen::VectorXd::Zero(1 + num_positions()));
-    edge_cost_.push_back(energy_cost);
 
-    // Add path length cost to all edges.
-    for (auto& edge : gcs_.Edges()) {
-      if (is_source_[edge->u().id()]) {
+    for (const auto& [name, vertices] : subgraphs_) {
+      if (!subgraph.empty() && name != subgraph) {
+        // If subgraph is not empty, we only add the cost to the specified
+        // subgraph.
         continue;
       }
-      edge->AddCost(Binding<PerspectiveQuadraticCost>(energy_cost, edge->xu()));
+      for (const auto& v : vertices) {
+        // The duration variable is the last element of the vertex.
+        v->AddCost(Binding<PerspectiveQuadraticCost>(energy_cost, v->x()));
+      }
     }
   }
 }
 
 void GCSTrajectoryOptimization::AddVelocityBounds(
     const Eigen::Ref<const Eigen::VectorXd>& lb,
-    const Eigen::Ref<const Eigen::VectorXd>& ub) {
+    const Eigen::Ref<const Eigen::VectorXd>& ub, const std::string& subgraph) {
   DRAKE_DEMAND(lb.size() == num_positions());
   DRAKE_DEMAND(ub.size() == num_positions());
 
@@ -364,15 +363,18 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
     auto velocity_constraint = std::make_shared<LinearConstraint>(
         A, Eigen::VectorXd::Constant(2 * num_positions(), -inf),
         Eigen::VectorXd::Zero(2 * num_positions()));
-    edge_constraint_.push_back(velocity_constraint);
 
-    // Add velocity bounds to all edges.
-    for (auto& edge : gcs_.Edges()) {
-      if (is_source_[edge->u().id()]) {
+    for (const auto& [name, vertices] : subgraphs_) {
+      if (!subgraph.empty() && name != subgraph) {
+        // If subgraph is not empty, we only add the cost to the specified
+        // subgraph.
         continue;
       }
-      edge->AddConstraint(
-          Binding<LinearConstraint>(velocity_constraint, edge->xu()));
+      for (const auto& v : vertices) {
+        // The duration variable is the last element of the vertex.
+        v->AddConstraint(
+            Binding<LinearConstraint>(velocity_constraint, v->x()));
+      }
     }
   }
 }

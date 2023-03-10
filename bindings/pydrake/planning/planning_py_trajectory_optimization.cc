@@ -392,13 +392,16 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             py::arg("from_subgraph") = "", py::arg("to_subgraph") = "",
             cls_doc.AddPoint.doc)
         .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
-            cls_doc.AddTimeCost.doc)
+            py::arg("subgraph") = "", cls_doc.AddTimeCost.doc)
         .def("AddPathLengthCost", &Class::AddPathLengthCost,
-            py::arg("weight") = 1.0, cls_doc.AddPathLengthCost.doc)
+            py::arg("weight") = 1.0, py::arg("subgraph") = "",
+            cls_doc.AddPathLengthCost.doc)
         .def("AddPathEnergyCost", &Class::AddPathEnergyCost,
-            py::arg("weight") = 1.0, cls_doc.AddPathEnergyCost.doc)
+            py::arg("weight") = 1.0, py::arg("subgraph") = "",
+            cls_doc.AddPathEnergyCost.doc)
         .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
-            py::arg("ub"), cls_doc.AddVelocityBounds.doc)
+            py::arg("ub"), py::arg("subgraph") = "",
+            cls_doc.AddVelocityBounds.doc)
         .def("SolvePath", &Class::SolvePath, py::arg("source_id"),
             py::arg("target_id"), py::arg("options"), cls_doc.SolvePath.doc);
   }
