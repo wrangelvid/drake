@@ -104,6 +104,7 @@ class GCSTrajectoryOptimization {
   @param to_subgraph is the name of the subgraph the outgoing edges of
     the point will be added to. For example, if the point is a start point
     one might leave the from_subgraph empty.
+  @param delay is the duration the point will be held at the position x.
 
   To add a midpoint, one would set both to_subgraph and from_subgraph so that
   the point is connected to the subgraphs on both sides.
@@ -112,7 +113,7 @@ class GCSTrajectoryOptimization {
   */
   VertexId AddPoint(const Eigen::Ref<const Eigen::VectorXd>& x,
                     const std::string& from_subgraph = "",
-                    const std::string& to_subgraph = "");
+                    const std::string& to_subgraph = "", double delay = 0.0);
 
   /** Adds a minimum time cost to all vertices in a subgraph.
   The cost is the sum of the time scaling variables of the subgraph.

@@ -42,13 +42,9 @@ GCSTrajectoryOptimization::GCSTrajectoryOptimization(
     : constructor_(constructor) {
   DRAKE_DEMAND(constructor_.order > 0);
   // Make time scaling set.
-  MatrixXd A_time(2, 1);
-  A_time.row(0) = MatrixXd::Identity(1, 1);
-  A_time.row(1) = -MatrixXd::Identity(1, 1);
-  VectorXd b_time = -constructor_.d_min * VectorXd::Ones(2);
-  b_time(0) = constructor_.d_max;
-
-  time_scaling_set_ = HPolyhedron(A_time, b_time);
+  time_scaling_set_ =
+      HPolyhedron::MakeBox(constructor_.d_min * Eigen::VectorXd::Ones(1),
+                           constructor_.d_max * Eigen::VectorXd::Ones(1));
 
   // Formulate edge costs and constraints.
   auto u_control = MakeMatrixContinuousVariable(num_positions(),
@@ -145,10 +141,15 @@ void GCSTrajectoryOptimization::AddSubgraph(
 
 VertexId GCSTrajectoryOptimization::AddPoint(
     const Eigen::Ref<const Eigen::VectorXd>& x,
-    const std::string& from_subgraph, const std::string& to_subgraph) {
+    const std::string& from_subgraph, const std::string& to_subgraph,
+    double delay) {
   if (to_subgraph.empty() && from_subgraph.empty()) {
     throw std::runtime_error(
         "Either to_subgraph or from_subgraph must be specified.");
+  }
+
+  if (delay < 0) {
+    throw std::runtime_error("Delay must be non-negative.");
   }
 
   std::vector<Vertex*> to_subgraph_vertices_containing_point;
@@ -193,16 +194,18 @@ VertexId GCSTrajectoryOptimization::AddPoint(
       }
     }
   }
+  // Make time scaling set.
+  auto time_scaling_set = HPolyhedron::MakeBox(delay * VectorXd::Ones(1),
+                                               delay * VectorXd::Ones(1));
 
   // Add point to graph.
   auto point_vertex =
-      gcs_.AddVertex(CartesianProduct(Point(x), time_scaling_set_));
+      gcs_.AddVertex(CartesianProduct(Point(x), time_scaling_set));
 
   // Add edges to subgraph vertices.
   for (const auto& vertex : to_subgraph_vertices_containing_point) {
-    auto edge = gcs_.AddEdge(
-        point_vertex->id(), vertex->id(),
-        point_vertex->name() + " -> " + to_subgraph + ": " + vertex->name());
+    auto edge = gcs_.AddEdge(point_vertex->id(), vertex->id(),
+                             point_vertex->name() + " -> " + vertex->name());
 
     // Match the position of the source and the first control point.
     for (int j = 0; j < num_positions(); j++) {
@@ -210,9 +213,8 @@ VertexId GCSTrajectoryOptimization::AddPoint(
     }
   }
   for (const auto& vertex : from_subgraph_vertices_containing_point) {
-    auto edge = gcs_.AddEdge(
-        vertex->id(), point_vertex->id(),
-        from_subgraph + ": " + vertex->name() + " -> " + point_vertex->name());
+    auto edge = gcs_.AddEdge(vertex->id(), point_vertex->id(),
+                             vertex->name() + " -> " + point_vertex->name());
 
     // Match the position of the target and the last control point.
     for (int j = 0; j < num_positions(); j++) {
@@ -439,12 +441,20 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
   std::vector<Eigen::MatrixX<double>> control_points;
   for (auto& edge : path_edges) {
     // Extract the control points from the solution.
+    // Sometimes the solution goes through a point which has a single control
+    // point.
+    int num_control_points = (edge->xv().size() - 1) / num_positions();
     Eigen::MatrixX<double> edge_path_points =
         Eigen::Map<Eigen::MatrixX<double>>(
             result.GetSolution(edge->xv()).data(), num_positions(),
-            constructor_.order + 1);
-    for (int i = 0; i < edge_path_points.cols(); ++i) {
-      control_points.push_back(edge_path_points.col(i));
+            num_control_points);
+    for (int i = 0; i < constructor_.order + 1; ++i) {
+      if (i < edge_path_points.cols()) {
+        control_points.push_back(edge_path_points.col(i));
+      } else {
+        control_points.push_back(
+            edge_path_points.col(edge_path_points.cols() - 1));
+      }
     }
 
     if (edge->v().id() == target_id) {

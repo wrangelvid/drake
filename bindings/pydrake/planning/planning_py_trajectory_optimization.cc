@@ -390,7 +390,7 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             py::arg("name"), cls_doc.AddSubgraph.doc)
         .def("AddPoint", &Class::AddPoint, py::arg("x"),
             py::arg("from_subgraph") = "", py::arg("to_subgraph") = "",
-            cls_doc.AddPoint.doc)
+            py::arg("delay") = 0.0, cls_doc.AddPoint.doc)
         .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
             py::arg("subgraph") = "", cls_doc.AddTimeCost.doc)
         .def("AddPathLengthCost", &Class::AddPathLengthCost,
