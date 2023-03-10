@@ -1,5 +1,7 @@
 #include "drake/planning/trajectory_optimization/gcs_trajectory_optimization.h"
 
+#include "iostream"
+
 #include "drake/common/pointer_cast.h"
 #include "drake/common/symbolic/decompose.h"
 #include "drake/geometry/optimization/cartesian_product.h"
@@ -139,10 +141,15 @@ void GCSTrajectoryOptimization::AddSubgraph(
   subgraph_regions_[name] = regions;
 }
 
-VertexId GCSTrajectoryOptimization::AddPoint(
-    const Eigen::Ref<const Eigen::VectorXd>& x,
-    const std::string& from_subgraph, const std::string& to_subgraph,
-    double delay) {
+void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
+                                            const std::string& name,
+                                            const std::string& from_subgraph,
+                                            const std::string& to_subgraph,
+                                            double delay) {
+  //  Check if region with name already exists.
+  DRAKE_DEMAND(subspaces_.find(name) == subspaces_.end());
+  DRAKE_DEMAND(region.ambient_dimension() == num_positions());
+
   if (to_subgraph.empty() && from_subgraph.empty()) {
     throw std::runtime_error(
         "Either to_subgraph or from_subgraph must be specified.");
@@ -152,8 +159,8 @@ VertexId GCSTrajectoryOptimization::AddPoint(
     throw std::runtime_error("Delay must be non-negative.");
   }
 
-  std::vector<Vertex*> to_subgraph_vertices_containing_point;
-  std::vector<Vertex*> from_subgraph_vertices_containing_point;
+  std::vector<Vertex*> to_subgraph_vertices;
+  std::vector<Vertex*> from_subgraph_vertices;
   if (!to_subgraph.empty()) {
     if (subgraphs_.find(to_subgraph) == subgraphs_.end()) {
       throw std::runtime_error("Subgraph " + to_subgraph + " does not exist.");
@@ -162,15 +169,22 @@ VertexId GCSTrajectoryOptimization::AddPoint(
       for (size_t i = 0; i < subgraph_regions_[to_subgraph].size(); i++) {
         // TODO(wrangelvid): Maybe there is a better way of doing this without
         //  the need to store the regions.
-        if (subgraph_regions_[to_subgraph][i].PointInSet(x)) {
-          to_subgraph_vertices_containing_point.push_back(
-              subgraphs_[to_subgraph][i]);
+        if (typeid(region) == typeid(Point)) {
+          // Checking if a point is in a region is faster than checking for
+          // intersection.
+          if (subgraph_regions_[to_subgraph][i].PointInSet(
+                  static_cast<const Point&>(region).x())) {
+            to_subgraph_vertices.push_back(subgraphs_[to_subgraph][i]);
+          }
+        } else {
+          if (subgraph_regions_[to_subgraph][i].IntersectsWith(region)) {
+            to_subgraph_vertices.push_back(subgraphs_[to_subgraph][i]);
+          }
         }
       }
-      if (to_subgraph_vertices_containing_point.empty()) {
-        throw std::runtime_error(
-            "Point is not in any of the regions of the subgraph " +
-            to_subgraph);
+      if (to_subgraph_vertices.empty()) {
+        throw std::runtime_error("Set does not intersect with subgraph " +
+                                 to_subgraph);
       }
     }
   }
@@ -182,15 +196,22 @@ VertexId GCSTrajectoryOptimization::AddPoint(
     } else {
       // Check if point is in any of the subgraph regions.
       for (size_t i = 0; i < subgraph_regions_[from_subgraph].size(); i++) {
-        if (subgraph_regions_[from_subgraph][i].PointInSet(x)) {
-          from_subgraph_vertices_containing_point.push_back(
-              subgraphs_[from_subgraph][i]);
+        if (typeid(region) == typeid(Point)) {
+          // Checking if a point is in a region is faster than checking for
+          // intersection.
+          if (subgraph_regions_[from_subgraph][i].PointInSet(
+                  static_cast<const Point&>(region).x())) {
+            from_subgraph_vertices.push_back(subgraphs_[from_subgraph][i]);
+          }
+        } else {
+          if (subgraph_regions_[from_subgraph][i].IntersectsWith(region)) {
+            from_subgraph_vertices.push_back(subgraphs_[from_subgraph][i]);
+          }
         }
       }
-      if (from_subgraph_vertices_containing_point.empty()) {
-        throw std::runtime_error(
-            "Point is not in any of the regions of the subgraph " +
-            from_subgraph);
+      if (from_subgraph_vertices.empty()) {
+        throw std::runtime_error("Set does not intersect with subgraph " +
+                                 from_subgraph);
       }
     }
   }
@@ -199,22 +220,22 @@ VertexId GCSTrajectoryOptimization::AddPoint(
                                                delay * VectorXd::Ones(1));
 
   // Add point to graph.
-  auto point_vertex =
-      gcs_.AddVertex(CartesianProduct(Point(x), time_scaling_set));
+  auto region_vertex =
+      gcs_.AddVertex(CartesianProduct(region, time_scaling_set), name);
 
   // Add edges to subgraph vertices.
-  for (const auto& vertex : to_subgraph_vertices_containing_point) {
-    auto edge = gcs_.AddEdge(point_vertex->id(), vertex->id(),
-                             point_vertex->name() + " -> " + vertex->name());
+  for (const auto& vertex : to_subgraph_vertices) {
+    auto edge = gcs_.AddEdge(region_vertex->id(), vertex->id(),
+                             region_vertex->name() + " -> " + vertex->name());
 
     // Match the position of the source and the first control point.
     for (int j = 0; j < num_positions(); j++) {
       edge->AddConstraint(edge->xu()[j] == edge->xv()[j]);
     }
   }
-  for (const auto& vertex : from_subgraph_vertices_containing_point) {
-    auto edge = gcs_.AddEdge(vertex->id(), point_vertex->id(),
-                             vertex->name() + " -> " + point_vertex->name());
+  for (const auto& vertex : from_subgraph_vertices) {
+    auto edge = gcs_.AddEdge(vertex->id(), region_vertex->id(),
+                             vertex->name() + " -> " + region_vertex->name());
 
     // Match the position of the target and the last control point.
     for (int j = 0; j < num_positions(); j++) {
@@ -224,7 +245,7 @@ VertexId GCSTrajectoryOptimization::AddPoint(
     }
   }
 
-  return point_vertex->id();
+  subspaces_[name] = region_vertex;
 }
 
 void GCSTrajectoryOptimization::AddTimeCost(double weight,
@@ -382,8 +403,18 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
 }
 
 BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
-    VertexId source_id, VertexId target_id,
+    std::string& source_subspace, std::string& target_subspace,
     const GraphOfConvexSetsOptions& options) {
+  // Check if the source and target subspaces are valid.
+  if (subspaces_.find(source_subspace) == subspaces_.end()) {
+    throw std::runtime_error("Source subspace does not exist.");
+  }
+  if (subspaces_.find(target_subspace) == subspaces_.end()) {
+    throw std::runtime_error("Target subspace does not exist.");
+  }
+
+  VertexId source_id = subspaces_[source_subspace]->id();
+  VertexId target_id = subspaces_[target_subspace]->id();
   auto result = gcs_.SolveShortestPath(source_id, target_id, options);
 
   if (!result.is_success()) {

@@ -388,9 +388,13 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
         .def("AddSubgraph", &Class::AddSubgraph, py::arg("regions"),
             py::arg("name"), cls_doc.AddSubgraph.doc)
-        .def("AddPoint", &Class::AddPoint, py::arg("x"),
+        .def("AddPoint", &Class::AddPoint, py::arg("x"), py::arg("name"),
             py::arg("from_subgraph") = "", py::arg("to_subgraph") = "",
             py::arg("delay") = 0.0, cls_doc.AddPoint.doc)
+        .def("AddSubspace", &Class::AddSubspace, py::arg("region"),
+            py::arg("name"), py::arg("from_subgraph") = "",
+            py::arg("to_subgraph") = "", py::arg("delay") = 0.0,
+            cls_doc.AddSubspace.doc)
         .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
             py::arg("subgraph") = "", cls_doc.AddTimeCost.doc)
         .def("AddPathLengthCost", &Class::AddPathLengthCost,
@@ -402,8 +406,9 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
             py::arg("ub"), py::arg("subgraph") = "",
             cls_doc.AddVelocityBounds.doc)
-        .def("SolvePath", &Class::SolvePath, py::arg("source_id"),
-            py::arg("target_id"), py::arg("options"), cls_doc.SolvePath.doc);
+        .def("SolvePath", &Class::SolvePath, py::arg("source_subspace"),
+            py::arg("target_subspace"), py::arg("options"),
+            cls_doc.SolvePath.doc);
   }
 }
 

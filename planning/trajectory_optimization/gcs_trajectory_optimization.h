@@ -13,6 +13,7 @@ namespace drake {
 namespace planning {
 namespace trajectory_optimization {
 
+using geometry::optimization::ConvexSet;
 using geometry::optimization::GraphOfConvexSets;
 using geometry::optimization::GraphOfConvexSetsOptions;
 using geometry::optimization::HPolyhedron;
@@ -98,6 +99,7 @@ class GCSTrajectoryOptimization {
 
   /** Add a point to the graph of convex sets.
   @param x is the position of the point.
+  @param name of the point.
   @param from_subgraph is the name of the subgraph the incoming edges of
     the point will be added to. For example, if the point is a goal point
     one might leave the to_subgraph empty.
@@ -111,10 +113,27 @@ class GCSTrajectoryOptimization {
 
   @return the id of the vertex in the graph of convex sets.
   */
-  VertexId AddPoint(const Eigen::Ref<const Eigen::VectorXd>& x,
-                    const std::string& from_subgraph = "",
-                    const std::string& to_subgraph = "", double delay = 0.0);
+  void AddPoint(const Eigen::Ref<const Eigen::VectorXd>& x,
+                const std::string& name, const std::string& from_subgraph = "",
+                const std::string& to_subgraph = "", double delay = 0.0) {
+    return GCSTrajectoryOptimization::AddSubspace(Point(x), name, from_subgraph,
+                                                  to_subgraph, delay);
+  };
 
+  /** Add a subspace to the graph of convex sets.
+  @param region the subspace in configuration space.
+  @param name the name of the subspace.
+  @param from_subgraph is the name of the subgraph the incoming edges of
+    the point will be added to. For example, if the point is a goal point
+    one might leave the to_subgraph empty.
+  @param to_subgraph is the name of the subgraph the outgoing edges of
+    the point will be added to. For example, if the point is a start point
+    one might leave the from_subgraph empty.
+  @param delay is the duration the point will be held at the position x.
+  */
+  void AddSubspace(const ConvexSet& region, const std::string& name,
+                   const std::string& from_subgraph = "",
+                   const std::string& to_subgraph = "", double delay = 0.0);
   /** Adds a minimum time cost to all vertices in a subgraph.
   The cost is the sum of the time scaling variables of the subgraph.
 
@@ -164,13 +183,14 @@ class GCSTrajectoryOptimization {
                          const std::string& subgraph = "");
 
   trajectories::BsplineTrajectory<double> SolvePath(
-      VertexId source_id, VertexId target_id,
+      std::string& source_subspace, std::string& target_subspace,
       const GraphOfConvexSetsOptions& options);
 
  private:
   HPolyhedron time_scaling_set_{};
   std::map<std::string, std::vector<Vertex*>> subgraphs_{};
   std::map<std::string, std::vector<HPolyhedron>> subgraph_regions_{};
+  std::map<std::string, Vertex*> subspaces_{};
   GCSTrajectoryOptimizationConstructor constructor_;
 
   Vertex* source_{};
