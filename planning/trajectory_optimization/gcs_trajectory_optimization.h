@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "drake/common/trajectories/bspline_trajectory.h"
@@ -20,6 +21,7 @@ using geometry::optimization::HPolyhedron;
 using geometry::optimization::Point;
 using VertexId = geometry::optimization::GraphOfConvexSets::VertexId;
 using Vertex = geometry::optimization::GraphOfConvexSets::Vertex;
+using Edge = geometry::optimization::GraphOfConvexSets::Edge;
 using solvers::Constraint;
 using solvers::Cost;
 
@@ -182,6 +184,17 @@ class GCSTrajectoryOptimization {
                          const Eigen::Ref<const Eigen::VectorXd>& ub,
                          const std::string& subgraph = "");
 
+  /** Adds a linear velocity constraints to a given subspace `lb` ≤ q̈(t) ≤ `ub`.
+  @param lb is the lower bound of the velocity.
+  @param ub is the upper bound of the velocity.
+  @param subspace is the name of the subspace the constraint will be added to.
+    If the name is empty, the constraint will be added to all subspaces.
+    Note, a point is a subspace.
+   */
+  void AddVelocityBoundsToSubspace(const Eigen::Ref<const Eigen::VectorXd>& lb,
+                                   const Eigen::Ref<const Eigen::VectorXd>& ub,
+                                   const std::string& subspace = "");
+
   trajectories::BsplineTrajectory<double> SolvePath(
       std::string& source_subspace, std::string& target_subspace,
       const GraphOfConvexSetsOptions& options);
@@ -190,7 +203,10 @@ class GCSTrajectoryOptimization {
   HPolyhedron time_scaling_set_{};
   std::map<std::string, std::vector<Vertex*>> subgraphs_{};
   std::map<std::string, std::vector<HPolyhedron>> subgraph_regions_{};
-  std::map<std::string, Vertex*> subspaces_{};
+  // subspace name, subspace, incoming edges, outgoing edges
+  std::map<std::string,
+           std::tuple<Vertex*, std::vector<Edge*>, std::vector<Edge*>>>
+      subspaces_{};
   GCSTrajectoryOptimizationConstructor constructor_;
 
   Vertex* source_{};

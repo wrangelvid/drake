@@ -223,10 +223,14 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
   auto region_vertex =
       gcs_.AddVertex(CartesianProduct(region, time_scaling_set), name);
 
+  std::vector<Edge*> incoming_edges;
+  std::vector<Edge*> outgoing_edges;
+
   // Add edges to subgraph vertices.
   for (const auto& vertex : to_subgraph_vertices) {
     auto edge = gcs_.AddEdge(region_vertex->id(), vertex->id(),
                              region_vertex->name() + " -> " + vertex->name());
+    outgoing_edges.push_back(edge);
 
     // Match the position of the source and the first control point.
     for (int j = 0; j < num_positions(); j++) {
@@ -236,6 +240,7 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
   for (const auto& vertex : from_subgraph_vertices) {
     auto edge = gcs_.AddEdge(vertex->id(), region_vertex->id(),
                              vertex->name() + " -> " + region_vertex->name());
+    incoming_edges.push_back(edge);
 
     // Match the position of the target and the last control point.
     for (int j = 0; j < num_positions(); j++) {
@@ -245,7 +250,7 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
     }
   }
 
-  subspaces_[name] = region_vertex;
+  subspaces_[name] = std::tuple(region_vertex, incoming_edges, outgoing_edges);
 }
 
 void GCSTrajectoryOptimization::AddTimeCost(double weight,
@@ -402,6 +407,71 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
   }
 }
 
+void GCSTrajectoryOptimization::AddVelocityBoundsToSubspace(
+    const Eigen::Ref<const Eigen::VectorXd>& lb,
+    const Eigen::Ref<const Eigen::VectorXd>& ub, const std::string& subspace) {
+  DRAKE_DEMAND(lb.size() == num_positions());
+  DRAKE_DEMAND(ub.size() == num_positions());
+
+  // We have q̇(t) = drds * dsdt = ṙ(s) / duration, and duration >= 0, so we
+  // use duration * lb <= ṙ(s) <= duration * ub. But will be reformulated as:
+  // - inf <=   duration * lb - ṙ(s) <= 0
+  // - inf <= - duration * ub + ṙ(s) <= 0
+
+  // A subspace can has incoming edges from a subgraph and outgoing edges to
+  // another subgraph. We will enforce the velocity bounds on the last control
+  // point of the incoming edges and the first control point on the outgoing
+  // edges.
+
+  auto u_rdot_control =
+      dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+          u_r_trajectory_.MakeDerivative())
+          ->control_points();
+
+  Eigen::MatrixXd b_ctrl(u_duration_.rows(), u_vars_.size());
+  DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_, &b_ctrl);
+
+  // First control point velocity constraint.
+  Eigen::MatrixXd M(u_rdot_control[0].rows(), u_vars_.size());
+  DecomposeLinearExpressions(u_rdot_control[0], u_vars_, &M);
+  Eigen::MatrixXd A_first(2 * num_positions(), M.cols());
+  A_first << M - ub * b_ctrl, -M + lb * b_ctrl;
+
+  auto first_ctrl_pt_velocity_constraint = std::make_shared<LinearConstraint>(
+      A_first, Eigen::VectorXd::Constant(2 * num_positions(), -inf),
+      Eigen::VectorXd::Zero(2 * num_positions()));
+
+  // Last control point velocity constraint.
+  DecomposeLinearExpressions(u_rdot_control[u_rdot_control.size() - 1], u_vars_,
+                             &M);
+  Eigen::MatrixXd A_last(2 * num_positions(), M.cols());
+  A_last << M - ub * b_ctrl, -M + lb * b_ctrl;
+
+  auto last_ctrl_pt_velocity_constraint = std::make_shared<LinearConstraint>(
+      A_last, Eigen::VectorXd::Constant(2 * num_positions(), -inf),
+      Eigen::VectorXd::Zero(2 * num_positions()));
+
+  for (const auto& [name, value] : subspaces_) {
+    if (!subspace.empty() && name != subspace) {
+      // If subspace is not empty, we only add the cost to the specified
+      // subspace.
+      continue;
+    }
+
+    const auto& incoming_edges = std::get<1>(value);
+    const auto& outgoing_edges = std::get<2>(value);
+    for (const auto& edge : incoming_edges) {
+      edge->AddConstraint(Binding<LinearConstraint>(
+          last_ctrl_pt_velocity_constraint, edge->xu()));
+    }
+
+    for (const auto& edge : outgoing_edges) {
+      edge->AddConstraint(Binding<LinearConstraint>(
+          first_ctrl_pt_velocity_constraint, edge->xv()));
+    }
+  }
+}
+
 BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     std::string& source_subspace, std::string& target_subspace,
     const GraphOfConvexSetsOptions& options) {
@@ -413,8 +483,8 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     throw std::runtime_error("Target subspace does not exist.");
   }
 
-  VertexId source_id = subspaces_[source_subspace]->id();
-  VertexId target_id = subspaces_[target_subspace]->id();
+  VertexId source_id = std::get<0>(subspaces_[source_subspace])->id();
+  VertexId target_id = std::get<0>(subspaces_[target_subspace])->id();
   auto result = gcs_.SolveShortestPath(source_id, target_id, options);
 
   if (!result.is_success()) {

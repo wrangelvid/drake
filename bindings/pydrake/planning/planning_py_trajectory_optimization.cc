@@ -406,6 +406,9 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
             py::arg("ub"), py::arg("subgraph") = "",
             cls_doc.AddVelocityBounds.doc)
+        .def("AddVelocityBoundsToSubspace", &Class::AddVelocityBoundsToSubspace,
+            py::arg("lb"), py::arg("ub"), py::arg("subspace") = "",
+            cls_doc.AddVelocityBoundsToSubspace.doc)
         .def("SolvePath", &Class::SolvePath, py::arg("source_subspace"),
             py::arg("target_subspace"), py::arg("options"),
             cls_doc.SolvePath.doc);
