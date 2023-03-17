@@ -21,6 +21,8 @@ and/or trajectories of dynamical systems.
   internal::DefinePlanningCollisionCheckerInterfaceTypes(m);
   internal::DefinePlanningCollisionChecker(m);
   internal::DefinePlanningTrajectoryOptimization(m);
+  internal::DefinePlanningSamplingBasedPlanners(m);
+  internal::DefinePlanningCommonRoboticsUtilities(m);
 }
 
 }  // namespace pydrake

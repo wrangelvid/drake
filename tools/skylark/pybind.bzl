@@ -119,6 +119,8 @@ def _check_cc_deps(*, cc_deps, testonly):
         # The dep is a header-only library with no dependencies (unless those
         # dependencies are also header-only).
         "//common:nice_type_name_override_header",
+        # HACK HACK HACK
+        "@common_robotics_utilities",
     ]
     if testonly:
         allowed_prefix.extend([

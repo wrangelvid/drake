@@ -25,6 +25,15 @@ drake_cc_package_library(
         ":robot_diagram_builder",
         ":scene_graph_collision_checker",
         ":unimplemented_collision_checker",
+        ":sampling_based_planners",
+        ":path_planning_result",
+        ":holonomic_kinematic_planning_space",
+        ":joint_limits",
+        ":sphere_robot_model_collision_checker",
+        ":mbp_environment_collision_checker",
+        ":make_planning_robot",
+        ":voxelized_environment_collision_checker",
+        ":voxelized_environment_builder",
     ],
 )
 
@@ -168,6 +177,321 @@ drake_cc_library(
         ":collision_checker",
         ":robot_diagram",
         "//multibody/parsing",
+    ],
+)
+
+drake_cc_library(
+    name = "sampling_based_planners",
+    hdrs = ["sampling_based_planners.h"],
+    interface_deps = [
+        ":birrt_planner",
+        ":parallel_birrt_planner",
+        ":path_processor",
+        ":planning_space",
+        ":prm_planner",
+        ":rrt_planner",
+        "@common_robotics_utilities",
+    ], 
+    deps = [
+        ":default_state_types",
+        ":holonomic_kinematic_planning_space",
+        ":joint_limits",
+        ":path_planning_result",
+        ":per_thread_random_source",
+        ":symmetric_planning_space",
+        ":valid_starts",
+        ":valid_starts_and_goals",
+        ":collision_checker",
+        "//common:essential",
+        "//multibody/inverse_kinematics:kinematic_evaluators",
+    ],
+)
+
+drake_cc_library(
+    name = "birrt_planner",
+    srcs = ["birrt_planner.cc"],
+    hdrs = ["birrt_planner.h"],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        ":per_thread_random_source",
+        ":planning_space",
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "default_state_types",
+    srcs = ["default_state_types.cc"],
+    hdrs = ["default_state_types.h"],
+    deps = [
+        "//common:essential",
+        "//math:geometric_transform",
+    ],
+)
+
+drake_cc_library(
+    name = "make_planning_robot",
+    srcs = ["make_planning_robot.cc"],
+    hdrs = ["make_planning_robot.h"],
+    deps = [
+        "//planning:collision_checker",
+    ],
+)
+
+drake_cc_library(
+    name = "holonomic_kinematic_planning_space",
+    srcs = ["holonomic_kinematic_planning_space.cc"],
+    hdrs = ["holonomic_kinematic_planning_space.h"],
+    deps = [
+        ":joint_limits",
+        ":symmetric_planning_space",
+        "@common_robotics_utilities",
+        "//common:essential",
+        "//planning:collision_checker",
+    ],
+)
+
+drake_cc_library(
+    name = "joint_limits",
+    srcs = ["joint_limits.cc"],
+    hdrs = ["joint_limits.h"],
+    deps = [
+        "//common:essential",
+        "//multibody/plant",
+    ],
+)
+
+drake_cc_library(
+    name = "parallel_birrt_planner",
+    srcs = [
+        "parallel_birrt_planner.cc",
+        "parallel_rrt_planner_tree.h",
+    ],
+    interface_deps = [
+        "@common_robotics_utilities",
+    ], 
+    hdrs = ["parallel_birrt_planner.h"],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        ":per_thread_random_source",
+        ":planning_space",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "path_planning_result",
+    srcs = ["path_planning_result.cc"],
+    hdrs = ["path_planning_result.h"],
+    deps = [
+        ":default_state_types",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "path_processor",
+    srcs = ["path_processor.cc"],
+    hdrs = ["path_processor.h"],
+    deps = [
+        ":default_state_types",
+        ":planning_space",
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "per_thread_random_source",
+    srcs = ["per_thread_random_source.cc"],
+    hdrs = ["per_thread_random_source.h"],
+    deps = [
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "planning_space",
+    srcs = ["planning_space.cc"],
+    hdrs = ["planning_space.h"],
+    deps = [
+        ":default_state_types",
+        ":per_thread_random_source",
+        ":valid_starts",
+        ":valid_starts_and_goals",
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "prm_planner",
+    srcs = ["prm_planner.cc"],
+    hdrs = ["prm_planner.h"],
+    interface_deps = [
+        "@common_robotics_utilities",
+    ],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        ":per_thread_random_source",
+        ":planning_space",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "roadmap_with_packed_edge_spheres",
+    srcs = ["roadmap_with_packed_edge_spheres.cc"],
+    hdrs = ["roadmap_with_packed_edge_spheres.h"],
+    interface_deps = [
+        "@common_robotics_utilities",
+    ],
+    deps = [
+        ":sampling_based_planners",
+        ":sphere_robot_model_collision_checker",
+        "//common:essential",
+        "//planning:collision_checker",
+    ],
+)
+
+drake_cc_library(
+    name = "rrt_planner",
+    srcs = ["rrt_planner.cc"],
+    hdrs = ["rrt_planner.h"],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        ":per_thread_random_source",
+        ":planning_space",
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+
+drake_cc_library(
+    name = "symmetric_planning_space",
+    srcs = ["symmetric_planning_space.cc"],
+    hdrs = ["symmetric_planning_space.h"],
+    deps = [
+        ":default_state_types",
+        ":per_thread_random_source",
+        ":planning_space",
+        ":valid_starts",
+        ":valid_starts_and_goals",
+        "@common_robotics_utilities",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "valid_starts_and_goals",
+    srcs = ["valid_starts_and_goals.cc"],
+    hdrs = ["valid_starts_and_goals.h"],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "valid_starts",
+    srcs = ["valid_starts.cc"],
+    hdrs = ["valid_starts.h"],
+    deps = [
+        ":default_state_types",
+        ":path_planning_result",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "voxel_self_filter",
+    srcs = ["voxel_self_filter.cc"],
+    hdrs = ["voxel_self_filter.h"],
+    interface_deps = [
+        "@common_robotics_utilities",
+    ],
+    deps = [
+        ":sphere_robot_model_collision_checker",
+        ":collision_checker",
+        "//common:essential",
+        "@voxelized_geometry_tools",
+    ],
+)
+
+drake_cc_library(
+    name = "voxelized_environment_builder",
+    srcs = ["voxelized_environment_builder.cc"],
+    hdrs = ["voxelized_environment_builder.h"],
+    interface_deps = [
+        "@common_robotics_utilities",
+    ],
+    deps = [
+        "//common:essential",
+        "//geometry",
+        "//multibody/plant",
+        ":body_shape_description",
+        "@voxelized_geometry_tools",
+    ],
+)
+
+drake_cc_library(
+    name = "mbp_environment_collision_checker",
+    srcs = ["mbp_environment_collision_checker.cc"],
+    hdrs = ["mbp_environment_collision_checker.h"],
+    deps = [
+        ":robot_diagram_builder",
+        ":sphere_robot_model_collision_checker",
+        "@common_robotics_utilities",
+        "//common:essential",
+        "//geometry",
+        "//multibody/plant",
+        ":body_shape_description",
+        ":collision_checker",
+        ":collision_checker_params",
+    ],
+)
+
+drake_cc_library(
+    name = "sphere_robot_model_collision_checker",
+    srcs = ["sphere_robot_model_collision_checker.cc"],
+    hdrs = ["sphere_robot_model_collision_checker.h"],
+    deps = [
+        ":robot_diagram_builder",
+        "@common_robotics_utilities",
+        "//common:essential",
+        "//geometry",
+        "//multibody/plant",
+        ":body_shape_description",
+        ":collision_checker",
+        ":collision_checker_params",
+    ],
+)
+
+drake_cc_library(
+    name = "voxelized_environment_collision_checker",
+    srcs = ["voxelized_environment_collision_checker.cc"],
+    hdrs = ["voxelized_environment_collision_checker.h"],
+    interface_deps = [
+        "@voxelized_geometry_tools",
+    ],
+    deps = [
+        ":robot_diagram_builder",
+        ":sphere_robot_model_collision_checker",
+        "@common_robotics_utilities",
+        "//common:essential",
+        "//geometry",
+        "//multibody/plant",
+        ":body_shape_description",
+        ":collision_checker",
+        ":collision_checker_params",
     ],
 )
 

@@ -11,15 +11,15 @@ def common_robotics_utilities_repository(
         mirrors = None):
     github_archive(
         name = name,
-        repository = "ToyotaResearchInstitute/common_robotics_utilities",
+        repository = "wrangelvid/common_robotics_utilities",
         upgrade_advice = """
         When updating, ensure that any new unit tests are reflected in
         package.BUILD.bazel and BUILD.bazel in drake. Tests may have been
-        updated in ToyotaResearchInstitute/common_robotics_utilities/test/ or
-        ToyotaResearchInstitute/common_robotics_utilities/CMakeLists.txt.ros2
+        updated in wrangelvid/common_robotics_utilities/test/ or
+        wrangelvid/common_robotics_utilities/CMakeLists.txt.ros2
         """,
-        commit = "d8b1a861d07e7c526e2a7dd3123d351498b53636",
-        sha256 = "8d3357221aeacabc538391b1ab53bd848a8f29ddae75896912c23b7bb9c3d8d8",  # noqa
+        commit = "a0bbfc0191d5bf065d7bd4edc9f80da9ce9c0900",
+        sha256 = "a8170d94620bbdcb6525ee64aac9b87b260f430aa8e9cd4cf39628ccbf89cb5c",  # noqa
         build_file = ":package.BUILD.bazel",
         mirrors = mirrors,
     )

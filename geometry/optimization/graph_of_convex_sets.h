@@ -482,8 +482,9 @@ class GraphOfConvexSets {
   */
   solvers::MathematicalProgramResult SolveShortestPath(
       VertexId source_id, VertexId target_id,
-      const GraphOfConvexSetsOptions& options =
-          GraphOfConvexSetsOptions()) const;
+      const GraphOfConvexSetsOptions& options = GraphOfConvexSetsOptions(),
+      std::vector<solvers::MathematicalProgramResult>* all_results =
+          nullptr) const;
 
   /** Convenience overload that takes const reference arguments for source and
   target.
@@ -491,8 +492,9 @@ class GraphOfConvexSets {
   */
   solvers::MathematicalProgramResult SolveShortestPath(
       const Vertex& source, const Vertex& target,
-      const GraphOfConvexSetsOptions& options =
-          GraphOfConvexSetsOptions()) const;
+      const GraphOfConvexSetsOptions& options = GraphOfConvexSetsOptions(),
+      std::vector<solvers::MathematicalProgramResult>* all_results =
+          nullptr) const;
 
  private:
   /* Facilitates testing. */
