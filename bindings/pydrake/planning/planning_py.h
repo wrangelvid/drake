@@ -26,6 +26,12 @@ void DefinePlanningRobotDiagram(py::module m);
 /* Defines bindings per planning_py_trajectory_optimization.cc. */
 void DefinePlanningTrajectoryOptimization(py::module m);
 
+/* Defines bindings per planning_py_trajectory_optimization.cc. */
+void DefinePlanningSamplingBasedPlanners(py::module m);
+
+/* Defines bindings per planning_py_trajectory_optimization.cc. */
+void DefinePlanningCommonRoboticsUtilities(py::module m);
+
 }  // namespace internal
 }  // namespace pydrake
 }  // namespace drake

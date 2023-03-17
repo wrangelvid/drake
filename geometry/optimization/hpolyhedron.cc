@@ -264,6 +264,9 @@ VectorXd HPolyhedron::UniformSample(
     RandomGenerator* generator,
     const Eigen::Ref<const Eigen::VectorXd>& previous_sample) const {
   std::normal_distribution<double> gaussian;
+  if (((A_ * previous_sample).array() > b_.array()).any()) {
+    return UniformSample(generator);
+  }
   // Choose a random direction.
   VectorXd direction(ambient_dimension());
   for (int i = 0; i < direction.size(); ++i) {
@@ -284,11 +287,14 @@ VectorXd HPolyhedron::UniformSample(
     }
   }
   if (std::isinf(theta_max) || std::isinf(theta_min) || theta_max < theta_min) {
-    throw std::invalid_argument(fmt::format(
-        "The Hit and Run algorithm failed to find a feasible point in the set. "
-        "The `previous_sample` must be in the set.\nmax(A * previous_sample - "
-        "b) = {}",
-        (A_ * previous_sample - b_).maxCoeff()));
+    throw std::invalid_argument(
+        fmt::format("The Hit and Run algorithm failed to find a feasible "
+                    "point in the set. "
+                    "The `previous_sample` must be in the set.\nmax(A * "
+                    "previous_sample - "
+                    "b) = {}\n{}, {}, {}",
+                    (A_ * previous_sample - b_).maxCoeff(), theta_min,
+                    theta_max, MaximumVolumeInscribedEllipsoid().Volume()));
   }
   // Now pick θ uniformly from [θ_min, θ_max).
   std::uniform_real_distribution<double> uniform_theta(theta_min, theta_max);
@@ -345,13 +351,13 @@ bool HPolyhedron::DoIsBounded() const {
   if (qr.dimensionOfKernel() > 0) {
     return false;
   }
-  // Stiemke's theorem of alternatives says that, given A with ker(A) = {0}, we
-  // either have existence of x ≠ 0 such that Ax ≥ 0 or we have existence of y
-  // > 0 such that y^T A = 0.  Since any y that verifies the second condition
-  // can be arbitrarily scaled, and would still pass the second condition,
-  // instead of asking y > 0, we can equivalently ask y ≥ 1.  So boundedness
-  // corresponds to the following LP being feasible: find y s.t. y ≥ 1, y^T A =
-  // 0.
+  // Stiemke's theorem of alternatives says that, given A with ker(A) = {0},
+  // we either have existence of x ≠ 0 such that Ax ≥ 0 or we have existence
+  // of y > 0 such that y^T A = 0.  Since any y that verifies the second
+  // condition can be arbitrarily scaled, and would still pass the second
+  // condition, instead of asking y > 0, we can equivalently ask y ≥ 1.  So
+  // boundedness corresponds to the following LP being feasible: find y s.t. y
+  // ≥ 1, y^T A = 0.
   MathematicalProgram prog;
   auto y = prog.NewContinuousVariables(A_.rows(), "y");
   prog.AddBoundingBoxConstraint(1.0, std::numeric_limits<double>::infinity(),
@@ -524,7 +530,9 @@ std::set<int> HPolyhedron::FindRedundant(double tol) const {
   return redundant_indices;
 }
 
-bool HPolyhedron::IsEmpty() const { return DoIsEmpty(A_, b_); }
+bool HPolyhedron::IsEmpty() const {
+  return DoIsEmpty(A_, b_);
+}
 
 bool HPolyhedron::DoPointInSet(const Eigen::Ref<const VectorXd>& x,
                                double tol) const {
@@ -566,7 +574,8 @@ HPolyhedron::DoAddPointInNonnegativeScalingConstraints(
     double d, const Eigen::Ref<const VectorXDecisionVariable>& x,
     const Eigen::Ref<const VectorXDecisionVariable>& t) const {
   std::vector<Binding<Constraint>> constraints;
-  // A (A_x x + b_x) ≤ (c' t + d) b, written as [A * A_x, -b * c'][x;t] ≤ d * b
+  // A (A_x x + b_x) ≤ (c' t + d) b, written as [A * A_x, -b * c'][x;t] ≤ d *
+  // b
   // - A * b_x
   const int m = A_.rows();
   MatrixXd A_bar(m, x.size() + t.size());
