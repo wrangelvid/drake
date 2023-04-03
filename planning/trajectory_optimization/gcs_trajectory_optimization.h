@@ -151,12 +151,53 @@ class GCSTrajectoryOptimization {
   of the L2Norm of the derivative control points of the curve divided by the
   order.
 
+  @param weight_matrix is the relative weight of each component for the cost.
+    The diagonal of the matrix is the weight for each dimension.
+    The matrix must be square and of size num_positions() x num_positions().
+  @param subgraph is the name of the subgraph the cost will be added to.
+    If the name is empty, the cost will be added to all subgraphs.
+
+  */
+  void AddPathLengthCost(const Eigen::MatrixXd& weight_matrix,
+                         const std::string& subgraph = "");
+
+  /** Adds multiple L2Norm Costs on the upper bound of the path length.
+  We upper bound the path integral by the sum of the distances between
+  control points. For Bezier curves, this is equivalent to the sum
+  of the L2Norm of the derivative control points of the curve divided by the
+  order.
+
   @param weight is the relative weight of the cost.
   @param subgraph is the name of the subgraph the cost will be added to.
     If the name is empty, the cost will be added to all subgraphs.
 
   */
-  void AddPathLengthCost(double weight = 1.0, const std::string& subgraph = "");
+  void AddPathLengthCost(double weight = 1.0,
+                         const std::string& subgraph = "") {
+    auto weight_matrix =
+        weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
+    return GCSTrajectoryOptimization::AddPathLengthCost(weight_matrix,
+                                                        subgraph);
+  };
+
+  /** Adds multiple Perspective Quadratic Costs on the upper bound of the path
+  energy. We upper bound the path integral by the sum of the distances between
+  the control points divided by the duration. For Bezier curves,
+  this is equivalent to the sum of the L2Norm of the derivative control points
+  of the curve divided by the order and the duration.
+
+  Note that for the perspective quadratic cost to be convex, the d_min must be
+  greater than 0.
+
+  @param weight_matrix is the relative weight of each component for the cost.
+    The diagonal of the matrix is the weight for each dimension.
+    The matrix must be square and of size num_positions() x num_positions().
+  @param subgraph is the name of the subgraph the cost will be added to.
+    If the name is empty, the cost will be added to all subgraphs.
+
+  */
+  void AddPathEnergyCost(const Eigen::MatrixXd& weight_matrix,
+                         const std::string& subgraph = "");
 
   /** Adds multiple Perspective Quadratic Costs on the upper bound of the path
   energy. We upper bound the path integral by the sum of the distances between
@@ -172,7 +213,13 @@ class GCSTrajectoryOptimization {
     If the name is empty, the cost will be added to all subgraphs.
 
   */
-  void AddPathEnergyCost(double weight = 1.0, const std::string& subgraph = "");
+  void AddPathEnergyCost(double weight = 1.0,
+                         const std::string& subgraph = "") {
+    auto weight_matrix =
+        weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
+    return GCSTrajectoryOptimization::AddPathEnergyCost(weight_matrix,
+                                                        subgraph);
+  };
 
   /** Adds a linear velocity constraints to a given subgraph `lb` ≤ q̈(t) ≤ `ub`.
   @param lb is the lower bound of the velocity.

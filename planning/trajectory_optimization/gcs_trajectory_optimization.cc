@@ -272,8 +272,9 @@ void GCSTrajectoryOptimization::AddTimeCost(double weight,
   }
 }
 
-void GCSTrajectoryOptimization::AddPathLengthCost(double weight,
-                                                  const std::string& subgraph) {
+// void GCSTrajectoryOptimization::AddPathLengthCost(double weight,
+void GCSTrajectoryOptimization::AddPathLengthCost(
+    const Eigen::MatrixXd& weight_matrix, const std::string& subgraph) {
   /*
     We will upper bound the path integral by the sum of the distances between
     the control points. ∑ ||rᵢ − rᵢ₊₁||₂
@@ -283,8 +284,8 @@ void GCSTrajectoryOptimization::AddPathLengthCost(double weight,
 
     So the path length cost becomes: ∑ ||ṙᵢ||₂ / order
   */
-  auto weight_matrix =
-      weight * MatrixXd::Identity(num_positions(), num_positions());
+  DRAKE_DEMAND(weight_matrix.rows() == num_positions());
+  DRAKE_DEMAND(weight_matrix.cols() == num_positions());
 
   auto u_rdot_control =
       dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
@@ -313,8 +314,8 @@ void GCSTrajectoryOptimization::AddPathLengthCost(double weight,
   }
 }
 
-void GCSTrajectoryOptimization::AddPathEnergyCost(double weight,
-                                                  const std::string& subgraph) {
+void GCSTrajectoryOptimization::AddPathEnergyCost(
+    const Eigen::MatrixXd& weight_matrix, const std::string& subgraph) {
   /*
     We will upper bound the path integral by the sum of the distances between
     the control points. ∑ ||rᵢ − rᵢ₊₁||₂
@@ -324,8 +325,10 @@ void GCSTrajectoryOptimization::AddPathEnergyCost(double weight,
 
     So the path energy cost becomes: ∑ ||ṙᵢ||₂ / (order * dᵢ)
   */
-  auto sqrt_weight_matrix =
-      weight * MatrixXd::Identity(num_positions(), num_positions()).cwiseSqrt();
+  DRAKE_DEMAND(weight_matrix.rows() == num_positions());
+  DRAKE_DEMAND(weight_matrix.cols() == num_positions());
+
+  auto sqrt_weight_matrix = weight_matrix.cwiseSqrt();
 
   auto u_rdot_control =
       dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
