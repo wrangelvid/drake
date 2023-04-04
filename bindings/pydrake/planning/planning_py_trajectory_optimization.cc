@@ -349,24 +349,24 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             cls_doc.AddPathLengthCost.doc);
   }
 
-  // GCSTrajectoryOptimizationConstructor
+  // GCSTrajectoryOptimizationOptions
   {
-    const auto& cls_doc = doc.GCSTrajectoryOptimizationConstructor;
-    py::class_<GCSTrajectoryOptimizationConstructor> bezier_gcs_constructor(
-        m, "GCSTrajectoryOptimizationConstructor", cls_doc.doc);
-    bezier_gcs_constructor.def(py::init<>(), cls_doc.ctor.doc)
-        .def_readwrite("order", &GCSTrajectoryOptimizationConstructor::order,
+    const auto& cls_doc = doc.GCSTrajectoryOptimizationOptions;
+    py::class_<GCSTrajectoryOptimizationOptions> bezier_gcs_options(
+        m, "GCSTrajectoryOptimizationOptions", cls_doc.doc);
+    bezier_gcs_options
+        .def(py::init<int>(), py::arg("dimension"), cls_doc.ctor.doc)
+        .def_readwrite("order", &GCSTrajectoryOptimizationOptions::order,
             cls_doc.order.doc)
-        .def_readwrite("d_max", &GCSTrajectoryOptimizationConstructor::d_max,
+        .def_readwrite("d_max", &GCSTrajectoryOptimizationOptions::d_max,
             cls_doc.d_max.doc)
-        .def_readwrite("d_min", &GCSTrajectoryOptimizationConstructor::d_min,
+        .def_readwrite("d_min", &GCSTrajectoryOptimizationOptions::d_min,
             cls_doc.d_min.doc)
         .def_readwrite("dimension",
-            &GCSTrajectoryOptimizationConstructor::dimension,
-            cls_doc.dimension.doc)
-        .def("__repr__", [](const GCSTrajectoryOptimizationConstructor& self) {
+            &GCSTrajectoryOptimizationOptions::dimension, cls_doc.dimension.doc)
+        .def("__repr__", [](const GCSTrajectoryOptimizationOptions& self) {
           return py::str(
-              "GCSTrajectoryOptimizationConstructor("
+              "GCSTrajectoryOptimizationOptions("
               "order={}, "
               "d_max={}, "
               "d_min={}, "
@@ -380,8 +380,8 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
     using Class = GCSTrajectoryOptimization;
     constexpr auto& cls_doc = doc.GCSTrajectoryOptimization;
     py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
-        .def(py::init<const GCSTrajectoryOptimizationConstructor&>(),
-            py::arg("constructor") = GCSTrajectoryOptimizationConstructor(), "")
+        .def(py::init<const GCSTrajectoryOptimizationOptions&>(),
+            py::arg("options"), "")
         .def("num_positions", &Class::num_positions, cls_doc.num_positions.doc)
         .def("GetGraphvizString", &Class::GetGraphvizString,
             py::arg("show_slacks") = true, py::arg("precision") = 3,

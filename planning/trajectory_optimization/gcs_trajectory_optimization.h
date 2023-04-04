@@ -25,8 +25,9 @@ using Edge = geometry::optimization::GraphOfConvexSets::Edge;
 using solvers::Constraint;
 using solvers::Cost;
 
-struct GCSTrajectoryOptimizationConstructor {
-  GCSTrajectoryOptimizationConstructor() = default;
+struct GCSTrajectoryOptimizationOptions {
+  GCSTrajectoryOptimizationOptions(int dim) : dimension(dim) {}
+
   /** The order of the Bézier trajectory within a region.
   It will have order + 1 control points.
   The order must be at least 1.
@@ -68,15 +69,13 @@ class GCSTrajectoryOptimization {
   /**
   Constructs the motion planning problem.
 
-  @param gcs_constructor includes settings to control the construction of the
+  @param gcs_options includes settings to control the construction of the
   construction of the graph of convex sets.
   */
-  GCSTrajectoryOptimization(
-      const GCSTrajectoryOptimizationConstructor& constructor =
-          GCSTrajectoryOptimizationConstructor());
+  GCSTrajectoryOptimization(const GCSTrajectoryOptimizationOptions& options);
 
   /** Returns the number of position variables. */
-  int num_positions() const { return constructor_.dimension; };
+  int num_positions() const { return options_.dimension; };
 
   /**
   @param show_slacks determines whether the values of the intermediate
@@ -254,7 +253,7 @@ class GCSTrajectoryOptimization {
   std::map<std::string,
            std::tuple<Vertex*, std::vector<Edge*>, std::vector<Edge*>>>
       subspaces_{};
-  GCSTrajectoryOptimizationConstructor constructor_;
+  GCSTrajectoryOptimizationOptions options_;
 
   Vertex* source_{};
   Vertex* target_{};

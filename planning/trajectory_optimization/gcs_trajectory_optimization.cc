@@ -40,19 +40,19 @@ using geometry::optimization::GraphOfConvexSetsOptions;
 const double inf = std::numeric_limits<double>::infinity();
 
 GCSTrajectoryOptimization::GCSTrajectoryOptimization(
-    const GCSTrajectoryOptimizationConstructor& constructor)
-    : constructor_(constructor) {
-  DRAKE_DEMAND(constructor_.order > 0);
+    const GCSTrajectoryOptimizationOptions& options)
+    : options_(options) {
+  DRAKE_DEMAND(options_.order > 0);
   // Make time scaling set.
   time_scaling_set_ =
-      HPolyhedron::MakeBox(constructor_.d_min * Eigen::VectorXd::Ones(1),
-                           constructor_.d_max * Eigen::VectorXd::Ones(1));
+      HPolyhedron::MakeBox(options_.d_min * Eigen::VectorXd::Ones(1),
+                           options_.d_max * Eigen::VectorXd::Ones(1));
 
   // Formulate edge costs and constraints.
-  auto u_control = MakeMatrixContinuousVariable(num_positions(),
-                                                constructor_.order + 1, "xu");
-  auto v_control = MakeMatrixContinuousVariable(num_positions(),
-                                                constructor_.order + 1, "xv");
+  auto u_control =
+      MakeMatrixContinuousVariable(num_positions(), options_.order + 1, "xu");
+  auto v_control =
+      MakeMatrixContinuousVariable(num_positions(), options_.order + 1, "xv");
 
   auto u_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
       u_control.data(), u_control.size());
@@ -67,12 +67,12 @@ GCSTrajectoryOptimization::GCSTrajectoryOptimization(
       {u_control_vars, u_duration_, v_control_vars, v_duration});
 
   u_r_trajectory_ = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(constructor_.order + 1, constructor_.order + 1,
+      BsplineBasis<Expression>(options_.order + 1, options_.order + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(u_control.cast<Expression>()));
 
   auto v_r_trajectory = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(constructor_.order + 1, constructor_.order + 1,
+      BsplineBasis<Expression>(options_.order + 1, options_.order + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(v_control.cast<Expression>()));
 
@@ -105,7 +105,7 @@ void GCSTrajectoryOptimization::AddSubgraph(
   int vertex_count = 0;
   for (const auto& region : regions) {
     subgraph_vertices.push_back(
-        gcs_.AddVertex(region.CartesianPower(constructor_.order + 1)
+        gcs_.AddVertex(region.CartesianPower(options_.order + 1)
                            .CartesianProduct(time_scaling_set_),
                        name + ": " + std::to_string(vertex_count)));
     vertex_count++;
@@ -244,9 +244,8 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
 
     // Match the position of the target and the last control point.
     for (int j = 0; j < num_positions(); j++) {
-      edge->AddConstraint(
-          edge->xu()[num_positions() * constructor_.order + j] ==
-          edge->xv()[j]);
+      edge->AddConstraint(edge->xu()[num_positions() * options_.order + j] ==
+                          edge->xv()[j]);
     }
   }
 
@@ -294,8 +293,7 @@ void GCSTrajectoryOptimization::AddPathLengthCost(
 
   for (size_t i = 0; i < u_rdot_control.size(); i++) {
     Eigen::MatrixXd M(u_rdot_control[i].rows(), u_vars_.size());
-    DecomposeLinearExpressions(u_rdot_control[i] / constructor_.order, u_vars_,
-                               &M);
+    DecomposeLinearExpressions(u_rdot_control[i] / options_.order, u_vars_, &M);
 
     auto path_length_cost = std::make_shared<L2NormCost>(
         weight_matrix * M, Eigen::VectorXd::Zero(num_positions()));
@@ -342,7 +340,7 @@ void GCSTrajectoryOptimization::AddPathEnergyCost(
     Eigen::MatrixXd A_ctrl(u_rdot_control[i].rows(), u_vars_.size());
     DecomposeLinearExpressions(u_rdot_control[i], u_vars_, &A_ctrl);
     Eigen::MatrixXd A(1 + num_positions(), A_ctrl.cols());
-    A << constructor_.order * b_ctrl, sqrt_weight_matrix * A_ctrl;
+    A << options_.order * b_ctrl, sqrt_weight_matrix * A_ctrl;
 
     auto energy_cost = std::make_shared<PerspectiveQuadraticCost>(
         A, Eigen::VectorXd::Zero(1 + num_positions()));
@@ -541,7 +539,7 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
   }
 
   // Extract the path from the edges.
-  std::vector<double> path_times(constructor_.order + 1, 0.0);
+  std::vector<double> path_times(options_.order + 1, 0.0);
   std::vector<Eigen::MatrixX<double>> control_points;
   for (auto& edge : path_edges) {
     // Extract the control points from the solution.
@@ -552,7 +550,7 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
         Eigen::Map<Eigen::MatrixX<double>>(
             result.GetSolution(edge->xv()).data(), num_positions(),
             num_control_points);
-    for (int i = 0; i < constructor_.order + 1; ++i) {
+    for (int i = 0; i < options_.order + 1; ++i) {
       if (i < edge_path_points.cols()) {
         control_points.push_back(edge_path_points.col(i));
       } else {
@@ -562,7 +560,7 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     }
 
     if (edge->v().id() == target_id) {
-      std::vector<double> next_path_times(constructor_.order + 1,
+      std::vector<double> next_path_times(options_.order + 1,
                                           path_times.back());
       path_times.insert(path_times.end(), next_path_times.begin(),
                         next_path_times.end());
@@ -571,13 +569,13 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
 
     // Extract the duration from the solution.
     double duration = result.GetSolution(edge->xv()).tail<1>().value();
-    std::vector<double> next_path_times(constructor_.order + 1,
+    std::vector<double> next_path_times(options_.order + 1,
                                         path_times.back() + duration);
     path_times.insert(path_times.end(), next_path_times.begin(),
                       next_path_times.end());
   }
-  return BsplineTrajectory<double>(
-      BsplineBasis(constructor_.order + 1, path_times), control_points);
+  return BsplineTrajectory<double>(BsplineBasis(options_.order + 1, path_times),
+                                   control_points);
 }
 
 }  // namespace trajectory_optimization
