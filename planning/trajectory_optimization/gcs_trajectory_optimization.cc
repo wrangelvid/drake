@@ -121,9 +121,9 @@ void GCSTrajectoryOptimization::AddSubgraph(
         auto v = subgraph_vertices[j];
         // Add path continuity constraints.
         auto uv_edge =
-            gcs_.AddEdge(u->id(), v->id(), u->name() + " -> " + v->name());
+            gcs_.AddEdge(*u, *v, u->name() + " -> " + v->name());
         auto vu_edge =
-            gcs_.AddEdge(v->id(), u->id(), v->name() + " -> " + u->name());
+            gcs_.AddEdge(*v, *u, v->name() + " -> " + u->name());
 
         // Add path continuity constraints.
         for (const auto& path_continuity_constraint : continuity_constraint_) {
@@ -228,7 +228,7 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
 
   // Add edges to subgraph vertices.
   for (const auto& vertex : to_subgraph_vertices) {
-    auto edge = gcs_.AddEdge(region_vertex->id(), vertex->id(),
+    auto edge = gcs_.AddEdge(*region_vertex, *vertex,
                              region_vertex->name() + " -> " + vertex->name());
     outgoing_edges.push_back(edge);
 
@@ -238,7 +238,7 @@ void GCSTrajectoryOptimization::AddSubspace(const ConvexSet& region,
     }
   }
   for (const auto& vertex : from_subgraph_vertices) {
-    auto edge = gcs_.AddEdge(vertex->id(), region_vertex->id(),
+    auto edge = gcs_.AddEdge(*vertex, *region_vertex,
                              vertex->name() + " -> " + region_vertex->name());
     incoming_edges.push_back(edge);
 
