@@ -68,12 +68,9 @@ class GCSTrajectoryOptimization {
   */
   GCSTrajectoryOptimization(const GCSTrajectoryOptimizationOptions& options);
 
-  // class SubgraphEdges;  // forward declaration.
   class Subgraph final {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Subgraph);
-
-    ~Subgraph();
 
     /** Returns the name of the subgraph.*/
     const std::string& name() const { return name_; }
@@ -199,8 +196,6 @@ class GCSTrajectoryOptimization {
   class SubgraphEdges final {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SubgraphEdges);
-
-    ~SubgraphEdges();
 
     const std::vector<Edge*>& edges() const { return edges_; }
 
