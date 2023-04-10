@@ -356,8 +356,6 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         m, "GCSTrajectoryOptimizationOptions", cls_doc.doc);
     bezier_gcs_options
         .def(py::init<int>(), py::arg("dimension"), cls_doc.ctor.doc)
-        .def_readwrite("order", &GCSTrajectoryOptimizationOptions::order,
-            cls_doc.order.doc)
         .def_readwrite("d_max", &GCSTrajectoryOptimizationOptions::d_max,
             cls_doc.d_max.doc)
         .def_readwrite("d_min", &GCSTrajectoryOptimizationOptions::d_min,
@@ -367,65 +365,94 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("__repr__", [](const GCSTrajectoryOptimizationOptions& self) {
           return py::str(
               "GCSTrajectoryOptimizationOptions("
-              "order={}, "
               "d_max={}, "
               "d_min={}, "
               "dimension={}, "
               ")")
-              .format(self.order, self.d_max, self.d_min, self.dimension);
+              .format(self.d_max, self.d_min, self.dimension);
         });
   }
 
   {
     using Class = GCSTrajectoryOptimization;
     constexpr auto& cls_doc = doc.GCSTrajectoryOptimization;
-    py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
-        .def(py::init<const GCSTrajectoryOptimizationOptions&>(),
-            py::arg("options"), "")
-        .def("num_positions", &Class::num_positions, cls_doc.num_positions.doc)
-        .def("GetGraphvizString", &Class::GetGraphvizString,
-            py::arg("show_slacks") = true, py::arg("precision") = 3,
-            py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
-        .def("AddSubgraph", &Class::AddSubgraph, py::arg("regions"),
-            py::arg("name"), cls_doc.AddSubgraph.doc)
-        .def("AddPoint", &Class::AddPoint, py::arg("x"), py::arg("name"),
-            py::arg("from_subgraph") = "", py::arg("to_subgraph") = "",
-            py::arg("delay") = 0.0, cls_doc.AddPoint.doc)
-        .def("AddSubspace", &Class::AddSubspace, py::arg("region"),
-            py::arg("name"), py::arg("from_subgraph") = "",
-            py::arg("to_subgraph") = "", py::arg("delay") = 0.0,
-            cls_doc.AddSubspace.doc)
-        .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
-            py::arg("subgraph") = "", cls_doc.AddTimeCost.doc)
+    auto gcs_traj_opt =
+        py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
+            .def(py::init<const GCSTrajectoryOptimizationOptions&>(),
+                py::arg("options"), "")
+            .def("num_positions", &Class::num_positions,
+                cls_doc.num_positions.doc)
+            .def("GetGraphvizString", &Class::GetGraphvizString,
+                py::arg("show_slacks") = true, py::arg("precision") = 3,
+                py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
+            .def("AddRegions", &Class::AddRegions, py::arg("regions"),
+                py::arg("order"), py::arg("name") = "", cls_doc.AddRegions.doc)
+            .def("AddEdges", &Class::AddEdges, py::arg("from"), py::arg("to"),
+                cls_doc.AddEdges.doc)
+            .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
+                cls_doc.AddTimeCost.doc)
+            .def("AddPathLengthCost",
+                py::overload_cast<const Eigen::MatrixXd&>(
+                    &Class::AddPathLengthCost),
+                py::arg("weight_matrix"),
+                cls_doc.AddPathLengthCost.doc_1args_weight_matrix)
+            .def("AddPathLengthCost",
+                py::overload_cast<double>(&Class::AddPathLengthCost),
+                py::arg("weight") = 1.0,
+                cls_doc.AddPathLengthCost.doc_1args_weight)
+            .def("AddPathEnergyCost",
+                py::overload_cast<const Eigen::MatrixXd&>(
+                    &Class::AddPathEnergyCost),
+                py::arg("weight_matrix"),
+                cls_doc.AddPathEnergyCost.doc_1args_weight_matrix)
+            .def("AddPathEnergyCost",
+                py::overload_cast<double>(&Class::AddPathEnergyCost),
+                py::arg("weight") = 1.0,
+                cls_doc.AddPathEnergyCost.doc_1args_weight)
+            .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
+                py::arg("ub"), cls_doc.AddVelocityBounds.doc)
+            .def("SolvePath", &Class::SolvePath, py::arg("source"),
+                py::arg("target"), py::arg("options"), cls_doc.SolvePath.doc);
+
+    // Subgraph
+    const auto& subgraph_doc = doc.GCSTrajectoryOptimization.Subgraph;
+    py::class_<Class::Subgraph>(gcs_traj_opt, "Subgraph", subgraph_doc.doc)
+        .def("name", &Class::Subgraph::name, subgraph_doc.name.doc)
+        .def("order", &Class::Subgraph::order, subgraph_doc.order.doc)
+        .def("size", &Class::Subgraph::size, subgraph_doc.order.doc)
+        .def("regions", &Class::Subgraph::regions, subgraph_doc.regions.doc)
+        .def("vertices", &Class::Subgraph::vertices, subgraph_doc.vertices.doc)
+        .def("edges", &Class::Subgraph::edges, subgraph_doc.edges.doc)
+        .def("AddTimeCost", &Class::Subgraph::AddTimeCost,
+            py::arg("weight") = 1.0, subgraph_doc.AddTimeCost.doc)
         .def("AddPathLengthCost",
-            py::overload_cast<const Eigen::MatrixXd&, const std::string&>(
-                &Class::AddPathLengthCost),
-            py::arg("weight_matrix"), py::arg("subgraph") = "",
-            cls_doc.AddPathLengthCost.doc_2args_weight_matrix_subgraph)
+            py::overload_cast<const Eigen::MatrixXd&>(
+                &Class::Subgraph::AddPathLengthCost),
+            py::arg("weight_matrix"),
+            subgraph_doc.AddPathLengthCost.doc_1args_weight_matrix)
         .def("AddPathLengthCost",
-            py::overload_cast<double, const std::string&>(
-                &Class::AddPathLengthCost),
-            py::arg("weight") = 1.0, py::arg("subgraph") = "",
-            cls_doc.AddPathLengthCost.doc_2args_weight_subgraph)
+            py::overload_cast<double>(&Class::Subgraph::AddPathLengthCost),
+            py::arg("weight") = 1.0,
+            subgraph_doc.AddPathLengthCost.doc_1args_weight)
         .def("AddPathEnergyCost",
-            py::overload_cast<const Eigen::MatrixXd&, const std::string&>(
-                &Class::AddPathEnergyCost),
-            py::arg("weight_matrix"), py::arg("subgraph") = "",
-            cls_doc.AddPathEnergyCost.doc_2args_weight_matrix_subgraph)
+            py::overload_cast<const Eigen::MatrixXd&>(
+                &Class::Subgraph::AddPathEnergyCost),
+            py::arg("weight_matrix"),
+            subgraph_doc.AddPathEnergyCost.doc_1args_weight_matrix)
         .def("AddPathEnergyCost",
-            py::overload_cast<double, const std::string&>(
-                &Class::AddPathEnergyCost),
-            py::arg("weight") = 1.0, py::arg("subgraph") = "",
-            cls_doc.AddPathEnergyCost.doc_2args_weight_subgraph)
-        .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
-            py::arg("ub"), py::arg("subgraph") = "",
-            cls_doc.AddVelocityBounds.doc)
-        .def("AddVelocityBoundsToSubspace", &Class::AddVelocityBoundsToSubspace,
-            py::arg("lb"), py::arg("ub"), py::arg("subspace") = "",
-            cls_doc.AddVelocityBoundsToSubspace.doc)
-        .def("SolvePath", &Class::SolvePath, py::arg("source_subspace"),
-            py::arg("target_subspace"), py::arg("options"),
-            cls_doc.SolvePath.doc);
+            py::overload_cast<double>(&Class::Subgraph::AddPathEnergyCost),
+            py::arg("weight") = 1.0,
+            subgraph_doc.AddPathEnergyCost.doc_1args_weight)
+        .def("AddVelocityBounds", &Class::Subgraph::AddVelocityBounds,
+            py::arg("lb"), py::arg("ub"), subgraph_doc.AddVelocityBounds.doc);
+
+    // SubgraphEdges
+    const auto& subgraph_edges_doc =
+        doc.GCSTrajectoryOptimization.SubgraphEdges;
+    py::class_<Class::SubgraphEdges>(
+        gcs_traj_opt, "SubgraphEdges", subgraph_edges_doc.doc)
+        .def("edges", &Class::SubgraphEdges::edges,
+            subgraph_edges_doc.edges.doc);
   }
 }
 
