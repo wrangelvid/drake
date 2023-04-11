@@ -14,6 +14,7 @@ namespace drake {
 namespace planning {
 namespace trajectory_optimization {
 
+using drake::geometry::optimization::ConvexSets;
 using geometry::optimization::ConvexSet;
 using geometry::optimization::GraphOfConvexSets;
 using geometry::optimization::GraphOfConvexSetsOptions;
@@ -60,6 +61,8 @@ class GCSTrajectoryOptimization {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(GCSTrajectoryOptimization);
 
+  ~GCSTrajectoryOptimization() = default;
+
   /**
   Constructs the motion planning problem.
 
@@ -72,6 +75,8 @@ class GCSTrajectoryOptimization {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Subgraph);
 
+    ~Subgraph() = default;
+
     /** Returns the name of the subgraph.*/
     const std::string& name() const { return name_; }
 
@@ -83,9 +88,7 @@ class GCSTrajectoryOptimization {
 
     /** Returns the regions associated with this subgraph before the
      * CartesianProduct.*/
-    const std::vector<std::shared_ptr<ConvexSet>>& regions() const {
-      return regions_;
-    }
+    const ConvexSets& regions() const { return regions_; }
 
     /** Returns all vertices associated with this subgraph.*/
     const std::vector<Vertex*>& vertices() const { return vertices_; }
@@ -172,11 +175,11 @@ class GCSTrajectoryOptimization {
 
    private:
     // construct a new subgraph
-    Subgraph(const std::vector<std::shared_ptr<ConvexSet>>& regions, int order,
+    Subgraph(const ConvexSets& regions, int order,
              std::vector<std::pair<int, int>>& regions_to_connect,
              const std::string& name, GCSTrajectoryOptimization* gcs);
 
-    const std::vector<std::shared_ptr<ConvexSet>> regions_;
+    const ConvexSets regions_;
     int order_;
     const std::string name_;
     GCSTrajectoryOptimization* gcs_;
@@ -197,10 +200,12 @@ class GCSTrajectoryOptimization {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SubgraphEdges);
 
+    ~SubgraphEdges() = default;
+
     const std::vector<Edge*>& edges() const { return edges_; }
 
    private:
-    SubgraphEdges(const Subgraph& from, const Subgraph& to,
+    SubgraphEdges(const Subgraph* from, const Subgraph* to,
                   GCSTrajectoryOptimization* gcs);
 
     GCSTrajectoryOptimization* gcs_;
@@ -229,10 +234,13 @@ class GCSTrajectoryOptimization {
   /** Creates a Subgraph with the given regions.
   @param regions represent the valid set a control point can be in.
   @param order is the order of the Bézier curve.
-  @name is the name of the subgraph.
+  @name is the name of the subgraph. A default name will be provided.
   */
-  Subgraph& AddRegions(const std::vector<std::shared_ptr<ConvexSet>>& regions,
-                       int order, const std::string& name) {
+  Subgraph* AddRegions(const ConvexSets& regions, int order,
+                       std::string name = "") {
+    if (name.empty()) {
+      name = fmt::format("S{}", subgraphs_.size());
+    }
     // TODO(wrangelvid): This is O(n^2) and can be improved.
     std::vector<std::pair<int, int>> edges_between_regions;
     for (size_t i = 0; i < regions.size(); i++) {
@@ -249,16 +257,16 @@ class GCSTrajectoryOptimization {
         new Subgraph(regions, order, edges_between_regions, name, this));
 
     max_order_ = std::max(max_order_, subgraphs_.back()->order());
-    return *subgraphs_.back();
+    return subgraphs_.back().get();
   }
 
   /** Connects two subgraphs with directed edges.
   @param from is the subgraph to connect from.
   @param to is the subgraph to connect to.
   */
-  SubgraphEdges& AddEdges(const Subgraph& from, const Subgraph& to) {
+  SubgraphEdges* AddEdges(const Subgraph* from, const Subgraph* to) {
     subgraph_edges_.emplace_back(new SubgraphEdges(from, to, this));
-    return *subgraph_edges_.back();
+    return subgraph_edges_.back().get();
   }
 
   /** Adds a minimum time cost to all vertices and edges in the graph

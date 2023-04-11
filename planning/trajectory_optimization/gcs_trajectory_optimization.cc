@@ -43,8 +43,7 @@ using geometry::optimization::GraphOfConvexSetsOptions;
 
 const double inf = std::numeric_limits<double>::infinity();
 
-Subgraph::Subgraph(const std::vector<std::shared_ptr<ConvexSet>>& regions,
-                   int order,
+Subgraph::Subgraph(const ConvexSets& regions, int order,
                    std::vector<std::pair<int, int>>& edges_between_regions,
                    const std::string& name, GCSTrajectoryOptimization* gcs)
     : regions_(regions), order_(order), name_(name), gcs_(gcs) {
@@ -128,16 +127,19 @@ Subgraph::Subgraph(const std::vector<std::shared_ptr<ConvexSet>>& regions,
     Subgraph::AddTimeCost(weight);
   }
 
-  for (auto weight_matrix : gcs_->global_path_length_costs_) {
-    Subgraph::AddPathLengthCost(weight_matrix);
-  }
+  if (order_ > 0) {
+    // These cost rely on the derivative of the trajectory.
+    for (auto weight_matrix : gcs_->global_path_length_costs_) {
+      Subgraph::AddPathLengthCost(weight_matrix);
+    }
 
-  for (auto weight_matrix : gcs_->global_path_energy_costs_) {
-    Subgraph::AddPathEnergyCost(weight_matrix);
-  }
+    for (auto weight_matrix : gcs_->global_path_energy_costs_) {
+      Subgraph::AddPathEnergyCost(weight_matrix);
+    }
 
-  for (auto& [lb, ub] : gcs_->global_velocity_bounds_) {
-    Subgraph::AddVelocityBounds(lb, ub);
+    for (auto& [lb, ub] : gcs_->global_velocity_bounds_) {
+      Subgraph::AddVelocityBounds(lb, ub);
+    }
   }
 }
 
@@ -164,6 +166,11 @@ void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
   */
   DRAKE_DEMAND(weight_matrix.rows() == gcs_->num_positions());
   DRAKE_DEMAND(weight_matrix.cols() == gcs_->num_positions());
+
+  if (order() == 0) {
+    throw std::runtime_error(
+        "Path length cost is not defined for a set of order 0.");
+  }
 
   auto u_rdot_control =
       dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
@@ -197,6 +204,11 @@ void Subgraph::AddPathEnergyCost(const Eigen::MatrixXd& weight_matrix) {
   DRAKE_DEMAND(weight_matrix.rows() == gcs_->num_positions());
   DRAKE_DEMAND(weight_matrix.cols() == gcs_->num_positions());
 
+  if (order() == 0) {
+    throw std::runtime_error(
+        "Path energy cost is not defined for a set of order 0.");
+  }
+
   auto sqrt_weight_matrix = weight_matrix.cwiseSqrt();
 
   auto u_rdot_control =
@@ -227,6 +239,11 @@ void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
                                  const Eigen::Ref<const Eigen::VectorXd>& ub) {
   DRAKE_DEMAND(lb.size() == gcs_->num_positions());
   DRAKE_DEMAND(ub.size() == gcs_->num_positions());
+
+  if (order() == 0) {
+    throw std::runtime_error(
+        "Velocity Bounds are not defined for a set of order 0.");
+  }
 
   // We have q̇(t) = drds * dsdt = ṙ(s) / duration, and duration >= 0, so we
   // use duration * lb <= ṙ(s) <= duration * ub. But will be reformulated as:
@@ -263,14 +280,14 @@ void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
   }
 }
 
-SubgraphEdges::SubgraphEdges(const Subgraph& from, const Subgraph& to,
+SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
                              GCSTrajectoryOptimization* gcs)
     : gcs_(gcs) {
   // Formulate edge costs and constraints.
   auto u_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
-                                                from.order() + 1, "xu");
-  auto v_control =
-      MakeMatrixContinuousVariable(gcs_->num_positions(), to.order() + 1, "xv");
+                                                from->order() + 1, "xu");
+  auto v_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
+                                                to->order() + 1, "xv");
 
   auto u_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
       u_control.data(), u_control.size());
@@ -284,12 +301,12 @@ SubgraphEdges::SubgraphEdges(const Subgraph& from, const Subgraph& to,
       {u_control_vars, u_duration, v_control_vars, v_duration});
 
   auto u_r_trajectory = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(from.order() + 1, from.order() + 1,
+      BsplineBasis<Expression>(from->order() + 1, from->order() + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(u_control.cast<Expression>()));
 
   auto v_r_trajectory = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(to.order() + 1, to.order() + 1,
+      BsplineBasis<Expression>(to->order() + 1, to->order() + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(v_control.cast<Expression>()));
 
@@ -304,12 +321,12 @@ SubgraphEdges::SubgraphEdges(const Subgraph& from, const Subgraph& to,
       M, VectorXd::Zero(gcs_->num_positions()));
 
   // TODO(wrangelvid) this can be parallelized.
-  for (int i = 0; i < from.size(); i++) {
-    for (int j = 0; j < to.size(); j++) {
-      if (from.regions()[i]->IntersectsWith(*to.regions()[j])) {
+  for (int i = 0; i < from->size(); i++) {
+    for (int j = 0; j < to->size(); j++) {
+      if (from->regions()[i]->IntersectsWith(*to->regions()[j])) {
         // Add edge.
-        auto u = from.vertices()[i];
-        auto v = to.vertices()[j];
+        auto u = from->vertices()[i];
+        auto v = to->vertices()[j];
         auto uv_edge =
             gcs_->gcs_.AddEdge(*u, *v, u->name() + " -> " + v->name());
 
@@ -337,7 +354,6 @@ void GCSTrajectoryOptimization::AddTimeCost(double weight) {
   for (auto& subgraph : subgraphs_) {
     subgraph->AddTimeCost(weight);
   }
-  // TODO(wrangelvid) add time cost to the edges.
   global_time_costs_.push_back(weight);
 }
 
@@ -345,18 +361,20 @@ void GCSTrajectoryOptimization::AddPathLengthCost(
     const Eigen::MatrixXd& weight_matrix) {
   // Add path length cost to each subgraph.
   for (auto& subgraph : subgraphs_) {
-    subgraph->AddPathLengthCost(weight_matrix);
+    if (subgraph->order() > 0) {
+      subgraph->AddPathLengthCost(weight_matrix);
+    }
   }
-  // TODO(wrangelvid) add length cost to the edges.
   global_path_length_costs_.push_back(weight_matrix);
 }
 
 void GCSTrajectoryOptimization::AddPathEnergyCost(
     const Eigen::MatrixXd& weight_matrix) {
   for (auto& subgraph : subgraphs_) {
-    subgraph->AddPathEnergyCost(weight_matrix);
+    if (subgraph->order() > 0) {
+      subgraph->AddPathEnergyCost(weight_matrix);
+    }
   }
-  // TODO(wrangelvid) add length cost to the edges.
   global_path_energy_costs_.push_back(weight_matrix);
 }
 
@@ -364,9 +382,10 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
     const Eigen::Ref<const Eigen::VectorXd>& lb,
     const Eigen::Ref<const Eigen::VectorXd>& ub) {
   for (auto& subgraph : subgraphs_) {
-    subgraph->AddVelocityBounds(lb, ub);
+    if (subgraph->order() > 0) {
+      subgraph->AddVelocityBounds(lb, ub);
+    }
   }
-  // TODO(wrangelvid) add length constraint to the edges.
   global_velocity_bounds_.push_back({lb, ub});
 }
 
