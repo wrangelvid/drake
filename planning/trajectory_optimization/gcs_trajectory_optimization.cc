@@ -450,20 +450,42 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
 BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     Subgraph& source, Subgraph& target,
     const GraphOfConvexSetsOptions& options) {
-  // Check if the source and target subgraphs have exactly one region.
-  // TODO(wrangelvid) allow multiple regions.
+  Eigen::VectorXd empty_vector;
+  VertexId source_id = source.vertices()[0]->id();
+  Vertex* dummy_source = nullptr;
+
+  VertexId target_id = target.vertices()[0]->id();
+  Vertex* dummy_target = nullptr;
+
   if (source.size() != 1) {
-    throw std::runtime_error("Source subgraph has more than one region.");
+    // Source subgraph has more than one region. Add a dummy source vertex.
+    dummy_source = gcs_.AddVertex(Point(empty_vector), "Dummy Source");
+    source_id = dummy_source->id();
+    for (const auto& v : source.vertices()) {
+      gcs_.AddEdge(*dummy_source, *v,
+                   dummy_source->name() + " -> " + v->name());
+    }
   }
   if (target.size() != 1) {
-    throw std::runtime_error("Target subgraph has more than one region.");
+    // Target subgraph has more than one region. Add a dummy target vertex.
+    dummy_target = gcs_.AddVertex(Point(empty_vector), "Dummy target");
+    target_id = dummy_target->id();
+    for (const auto& v : target.vertices()) {
+      gcs_.AddEdge(*v, *dummy_target,
+                   v->name() + " -> " + dummy_target->name());
+    }
   }
 
-  VertexId source_id = source.vertices()[0]->id();
-  VertexId target_id = target.vertices()[0]->id();
   auto result = gcs_.SolveShortestPath(source_id, target_id, options);
 
   if (!result.is_success()) {
+    if (dummy_source != nullptr) {
+      gcs_.RemoveVertex(dummy_source->id());
+    }
+
+    if (dummy_target != nullptr) {
+      gcs_.RemoveVertex(dummy_target->id());
+    }
     throw std::runtime_error("GCS failed to find a path.");
   }
 
@@ -548,6 +570,15 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     path_times.insert(path_times.end(), next_path_times.begin(),
                       next_path_times.end());
   }
+
+  if (dummy_source != nullptr) {
+    gcs_.RemoveVertex(dummy_source->id());
+  }
+
+  if (dummy_target != nullptr) {
+    gcs_.RemoveVertex(dummy_target->id());
+  }
+
   return BsplineTrajectory<double>(BsplineBasis(max_order_ + 1, path_times),
                                    control_points);
 }
