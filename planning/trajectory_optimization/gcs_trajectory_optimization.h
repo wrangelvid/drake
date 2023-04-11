@@ -145,7 +145,7 @@ class GCSTrajectoryOptimization {
       return Subgraph::AddPathEnergyCost(weight_matrix);
     };
 
-    /** Adds a linear velocity constraints to the whole graph `lb` ≤ q̈(t) ≤
+    /** Adds a linear velocity constraints to the subgraph `lb` ≤ q̈(t) ≤
     `ub`.
     @param lb is the lower bound of the velocity.
     @param ub is the upper bound of the velocity.
@@ -183,6 +183,15 @@ class GCSTrajectoryOptimization {
 
     ~SubgraphEdges() = default;
 
+    /** Adds a linear velocity constraints to the control point connecting the
+    subgraphs `lb` ≤ q̈(t) ≤ `ub`. At least one of the subgraphs must have an
+    order of at least 1.
+    @param lb is the lower bound of the velocity.
+    @param ub is the upper bound of the velocity.
+    */
+    void AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
+                           const Eigen::Ref<const Eigen::VectorXd>& ub);
+
     const std::vector<Edge*>& edges() const { return edges_; }
 
    private:
@@ -192,8 +201,19 @@ class GCSTrajectoryOptimization {
     bool RegionsConnectThroughSubspace(const ConvexSet& A, const ConvexSet& B,
                                        const ConvexSet& subspace);
 
+    const Subgraph* from_;
+    const Subgraph* to_;
     GCSTrajectoryOptimization* gcs_;
+
     std::vector<Edge*> edges_;
+
+    Eigen::VectorX<symbolic::Variable> u_duration_;
+    Eigen::VectorX<symbolic::Variable> u_vars_;
+    trajectories::BsplineTrajectory<symbolic::Expression> u_r_trajectory_;
+
+    Eigen::VectorX<symbolic::Variable> v_duration_;
+    Eigen::VectorX<symbolic::Variable> v_vars_;
+    trajectories::BsplineTrajectory<symbolic::Expression> v_r_trajectory_;
 
     friend class GCSTrajectoryOptimization;
   };

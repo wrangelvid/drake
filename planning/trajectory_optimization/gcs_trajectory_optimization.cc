@@ -289,7 +289,7 @@ void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
 SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
                              const ConvexSet* subspace,
                              GCSTrajectoryOptimization* gcs)
-    : gcs_(gcs) {
+    : from_(from), to_(to), gcs_(gcs) {
   // Formulate edge costs and constraints.
   if (subspace != nullptr) {
     if (subspace->ambient_dimension() != gcs_->num_positions()) {
@@ -312,26 +312,28 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
   auto v_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
       v_control.data(), v_control.size());
 
-  auto u_duration = MakeVectorContinuousVariable(1, "Tu");
-  auto v_duration = MakeVectorContinuousVariable(1, "Tv");
+  u_duration_ = MakeVectorContinuousVariable(1, "Tu");
+  v_duration_ = MakeVectorContinuousVariable(1, "Tv");
 
+  u_vars_ = solvers::ConcatenateVariableRefList({u_control_vars, u_duration_});
+  v_vars_ = solvers::ConcatenateVariableRefList({v_control_vars, v_duration_});
   auto edge_vars = solvers::ConcatenateVariableRefList(
-      {u_control_vars, u_duration, v_control_vars, v_duration});
+      {u_control_vars, u_duration_, v_control_vars, v_duration_});
 
-  auto u_r_trajectory = BsplineTrajectory<Expression>(
+  u_r_trajectory_ = BsplineTrajectory<Expression>(
       BsplineBasis<Expression>(from->order() + 1, from->order() + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(u_control.cast<Expression>()));
 
-  auto v_r_trajectory = BsplineTrajectory<Expression>(
+  v_r_trajectory_ = BsplineTrajectory<Expression>(
       BsplineBasis<Expression>(to->order() + 1, to->order() + 1,
                                math::KnotVectorType::kClampedUniform, 0, 1),
       EigenToStdVector<Expression>(v_control.cast<Expression>()));
 
   // Zeroth order continuity constraints.
   const Eigen::VectorX<Expression> path_continuity_error =
-      v_r_trajectory.control_points().front() -
-      u_r_trajectory.control_points().back();
+      v_r_trajectory_.control_points().front() -
+      u_r_trajectory_.control_points().back();
   Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
   DecomposeLinearExpressions(path_continuity_error, edge_vars, &M);
 
@@ -399,6 +401,80 @@ bool SubgraphEdges::RegionsConnectThroughSubspace(const ConvexSet& A,
     subspace.AddPointInSetConstraints(&prog, x);
     solvers::MathematicalProgramResult result = solvers::Solve(prog);
     return result.is_success();
+  }
+}
+
+void SubgraphEdges::AddVelocityBounds(
+    const Eigen::Ref<const Eigen::VectorXd>& lb,
+    const Eigen::Ref<const Eigen::VectorXd>& ub) {
+  // We have q̇(t) = drds * dsdt = ṙ(s) / duration, and duration >= 0, so we
+  // use duration * lb <= ṙ(s) <= duration * ub. But will be reformulated as:
+  // - inf <=   duration * lb - ṙ(s) <= 0
+  // - inf <= - duration * ub + ṙ(s) <= 0
+
+  // We will enforce the velocity bounds on the last control point of the u set
+  // and on the first control point of the v set unless one of the sets are of
+  // order zero. In the zero order case, velocity doesn't matter since its a
+  // point.
+  if (from_->order() == 0 && to_->order() == 0) {
+    throw std::runtime_error(
+        "Cannot add velocity bounds to a subgraph edges where both subgraphs "
+        "have zero order.");
+  }
+
+  if (from_->order() > 0) {
+    // Add velocity bounds to the last control point of the u set.
+    auto u_rdot_control =
+        dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+            u_r_trajectory_.MakeDerivative())
+            ->control_points();
+
+    Eigen::MatrixXd b_ctrl(u_duration_.rows(), u_vars_.size());
+    DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_,
+                               &b_ctrl);
+
+    // Last control point velocity constraint.
+    Eigen::MatrixXd M(u_rdot_control[0].rows(), u_vars_.size());
+    DecomposeLinearExpressions(u_rdot_control[u_rdot_control.size() - 1],
+                               u_vars_, &M);
+    Eigen::MatrixXd A_last(2 * gcs_->num_positions(), M.cols());
+    A_last << M - ub * b_ctrl, -M + lb * b_ctrl;
+
+    auto last_ctrl_pt_velocity_constraint = std::make_shared<LinearConstraint>(
+        A_last, Eigen::VectorXd::Constant(2 * gcs_->num_positions(), -inf),
+        Eigen::VectorXd::Zero(2 * gcs_->num_positions()));
+
+    for (const auto& edge : edges_) {
+      edge->AddConstraint(Binding<LinearConstraint>(
+          last_ctrl_pt_velocity_constraint, edge->xu()));
+    }
+  }
+
+  if (to_->order() > 0) {
+    // Add velocity bounds to the first control point of the v set.
+    auto v_rdot_control =
+        dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+            v_r_trajectory_.MakeDerivative())
+            ->control_points();
+
+    Eigen::MatrixXd b_ctrl(v_duration_.rows(), v_vars_.size());
+    DecomposeLinearExpressions(v_duration_.cast<Expression>(), v_vars_,
+                               &b_ctrl);
+
+    // First control point velocity constraint.
+    Eigen::MatrixXd M(v_rdot_control[0].rows(), v_vars_.size());
+    DecomposeLinearExpressions(v_rdot_control[0], v_vars_, &M);
+    Eigen::MatrixXd A_first(2 * gcs_->num_positions(), M.cols());
+    A_first << M - ub * b_ctrl, -M + lb * b_ctrl;
+
+    auto first_ctrl_pt_velocity_constraint = std::make_shared<LinearConstraint>(
+        A_first, Eigen::VectorXd::Constant(2 * gcs_->num_positions(), -inf),
+        Eigen::VectorXd::Zero(2 * gcs_->num_positions()));
+
+    for (const auto& edge : edges_) {
+      edge->AddConstraint(Binding<LinearConstraint>(
+          first_ctrl_pt_velocity_constraint, edge->xv()));
+    }
   }
 }
 

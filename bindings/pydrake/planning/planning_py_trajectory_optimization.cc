@@ -428,8 +428,11 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         doc.GCSTrajectoryOptimization.SubgraphEdges;
     py::class_<Class::SubgraphEdges>(
         gcs_traj_opt, "SubgraphEdges", subgraph_edges_doc.doc)
-        .def("edges", &Class::SubgraphEdges::edges,
-            subgraph_edges_doc.edges.doc);
+        .def(
+            "edges", &Class::SubgraphEdges::edges, subgraph_edges_doc.edges.doc)
+        .def("AddVelocityBounds", &Class::SubgraphEdges::AddVelocityBounds,
+            py::arg("lb"), py::arg("ub"),
+            subgraph_edges_doc.AddVelocityBounds.doc);
   }
 }
 
