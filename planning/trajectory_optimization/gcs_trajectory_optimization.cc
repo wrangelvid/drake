@@ -8,6 +8,7 @@
 #include "drake/geometry/optimization/hpolyhedron.h"
 #include "drake/geometry/optimization/point.h"
 #include "drake/math/matrix_util.h"
+#include "drake/solvers/solve.h"
 
 namespace drake {
 namespace planning {
@@ -28,6 +29,7 @@ using solvers::L2NormCost;
 using solvers::LinearConstraint;
 using solvers::LinearCost;
 using solvers::LinearEqualityConstraint;
+using solvers::LorentzConeConstraint;
 using solvers::PerspectiveQuadraticCost;
 using std::numeric_limits;
 using symbolic::DecomposeLinearExpressions;
@@ -281,9 +283,21 @@ void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
 }
 
 SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
+                             const ConvexSet* subspace,
                              GCSTrajectoryOptimization* gcs)
     : gcs_(gcs) {
   // Formulate edge costs and constraints.
+  if (subspace != nullptr) {
+    if (subspace->ambient_dimension() != gcs_->num_positions()) {
+      throw std::runtime_error(
+          "Subspace dimension must match the number of positions.");
+    }
+    if (typeid(*subspace) != typeid(Point) &&
+        typeid(*subspace) != typeid(HPolyhedron)) {
+      throw std::runtime_error("Subspace must be a Point or HPolyhedron.");
+    }
+  }
+
   auto u_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
                                                 from->order() + 1, "xu");
   auto v_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
@@ -324,6 +338,13 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
   for (int i = 0; i < from->size(); i++) {
     for (int j = 0; j < to->size(); j++) {
       if (from->regions()[i]->IntersectsWith(*to->regions()[j])) {
+        if (subspace != nullptr) {
+          // Check if the regions are connected through the subspace.
+          if (!RegionsConnectThroughSubspace(*from->regions()[i],
+                                             *to->regions()[j], *subspace)) {
+            continue;
+          }
+        }
         // Add edge.
         auto u = from->vertices()[i];
         auto v = to->vertices()[j];
@@ -335,8 +356,45 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
         // Add path continuity constraints.
         uv_edge->AddConstraint(
             Binding<Constraint>(path_continuity_constraint, {u->x(), v->x()}));
+
+        if (subspace != nullptr) {
+          // Add subspace constraints to the first control point of the v
+          // vertex. Since we are using zeroth order continuity, the last
+          // control point
+          auto vars = v->x().segment(0, gcs_->num_positions());
+          solvers::MathematicalProgram prog{};
+          const auto& x =
+              prog.NewContinuousVariables(gcs_->num_positions(), "x");
+          subspace->AddPointInSetConstraints(&prog, x);
+          for (const auto& binding : prog.GetAllConstraints()) {
+            const std::shared_ptr<Constraint>& constraint = binding.evaluator();
+            uv_edge->AddConstraint(Binding<Constraint>(constraint, vars));
+          }
+        }
       }
     }
+  }
+}
+
+bool SubgraphEdges::RegionsConnectThroughSubspace(const ConvexSet& A,
+                                                  const ConvexSet& B,
+                                                  const ConvexSet& subspace) {
+  DRAKE_THROW_UNLESS(A.ambient_dimension() == B.ambient_dimension() &&
+                     A.ambient_dimension() == subspace.ambient_dimension());
+  if (typeid(subspace) == typeid(Point)) {
+    // If the subspace is a point, then the point must be in both A and B.
+    return A.PointInSet(static_cast<const Point&>(subspace).x()) &&
+           B.PointInSet(static_cast<const Point&>(subspace).x());
+  } else {
+    // Otherwise, we can formulate a problem to check if a point is contained in
+    // A, B and the subspace.
+    solvers::MathematicalProgram prog{};
+    const auto& x = prog.NewContinuousVariables(gcs_->num_positions(), "x");
+    A.AddPointInSetConstraints(&prog, x);
+    B.AddPointInSetConstraints(&prog, x);
+    subspace.AddPointInSetConstraints(&prog, x);
+    solvers::MathematicalProgramResult result = solvers::Solve(prog);
+    return result.is_success();
   }
 }
 

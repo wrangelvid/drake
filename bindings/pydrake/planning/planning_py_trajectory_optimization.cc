@@ -388,7 +388,7 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             .def("AddRegions", &Class::AddRegions, py::arg("regions"),
                 py::arg("order"), py::arg("name") = "", cls_doc.AddRegions.doc)
             .def("AddEdges", &Class::AddEdges, py::arg("from"), py::arg("to"),
-                cls_doc.AddEdges.doc)
+                py::arg("subspace") = py::none(), cls_doc.AddEdges.doc)
             .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
                 cls_doc.AddTimeCost.doc)
             .def("AddPathLengthCost",

@@ -206,7 +206,10 @@ class GCSTrajectoryOptimization {
 
    private:
     SubgraphEdges(const Subgraph* from, const Subgraph* to,
-                  GCSTrajectoryOptimization* gcs);
+                  const ConvexSet* subspace, GCSTrajectoryOptimization* gcs);
+
+    bool RegionsConnectThroughSubspace(const ConvexSet& A, const ConvexSet& B,
+                                       const ConvexSet& subspace);
 
     GCSTrajectoryOptimization* gcs_;
     std::vector<Edge*> edges_;
@@ -263,9 +266,15 @@ class GCSTrajectoryOptimization {
   /** Connects two subgraphs with directed edges.
   @param from is the subgraph to connect from.
   @param to is the subgraph to connect to.
+  @param subspace is the subspace that the connecting control points must be in.
+    Subspace is optional. Only edges that connect through the subspace will be
+  added. Only subspaces of type point or HPolytope are sre supported. Otherwise
+  create a subgraph of zero order with the subspace as the region and connect it
+  between the two subgraphs.
   */
-  SubgraphEdges* AddEdges(const Subgraph* from, const Subgraph* to) {
-    subgraph_edges_.emplace_back(new SubgraphEdges(from, to, this));
+  SubgraphEdges* AddEdges(const Subgraph* from, const Subgraph* to,
+                          const ConvexSet* subspace = nullptr) {
+    subgraph_edges_.emplace_back(new SubgraphEdges(from, to, subspace, this));
     return subgraph_edges_.back().get();
   }
 
