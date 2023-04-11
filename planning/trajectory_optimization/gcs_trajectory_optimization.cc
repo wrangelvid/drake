@@ -45,8 +45,9 @@ using geometry::optimization::GraphOfConvexSetsOptions;
 
 const double inf = std::numeric_limits<double>::infinity();
 
-Subgraph::Subgraph(const ConvexSets& regions, int order,
+Subgraph::Subgraph(const ConvexSets& regions,
                    std::vector<std::pair<int, int>>& edges_between_regions,
+                   int order, double d_min, double d_max,
                    const std::string& name, GCSTrajectoryOptimization* gcs)
     : regions_(regions), order_(order), name_(name), gcs_(gcs) {
   if (order_ < 0) {
@@ -57,6 +58,9 @@ Subgraph::Subgraph(const ConvexSets& regions, int order,
   for (const auto& region : regions_) {
     DRAKE_DEMAND(region->ambient_dimension() == gcs->num_positions());
   }
+  // Make time scaling set.
+  HPolyhedron time_scaling_set = HPolyhedron::MakeBox(
+      d_min * Eigen::VectorXd::Ones(1), d_max * Eigen::VectorXd::Ones(1));
 
   // Formulate edge costs and constraints.
   auto u_control =
@@ -104,7 +108,7 @@ Subgraph::Subgraph(const ConvexSets& regions, int order,
       vertex_set.emplace_back(*regions_[i]);
     }
     // Add time scaling set.
-    vertex_set.emplace_back(gcs->time_scaling_set_);
+    vertex_set.emplace_back(time_scaling_set);
 
     vertices_.emplace_back(gcs_->gcs_.AddVertex(
         CartesianProduct(vertex_set), name + ": " + std::to_string(i)));
@@ -398,13 +402,11 @@ bool SubgraphEdges::RegionsConnectThroughSubspace(const ConvexSet& A,
   }
 }
 
-GCSTrajectoryOptimization::GCSTrajectoryOptimization(
-    const GCSTrajectoryOptimizationOptions& options)
-    : options_(options) {
-  // Make time scaling set.
-  time_scaling_set_ =
-      HPolyhedron::MakeBox(options_.d_min * Eigen::VectorXd::Ones(1),
-                           options_.d_max * Eigen::VectorXd::Ones(1));
+GCSTrajectoryOptimization::GCSTrajectoryOptimization(int dimension) {
+  if (dimension < 1) {
+    throw std::runtime_error("Dimension must be greater than 0.");
+  }
+  dimension_ = dimension;
 }
 
 void GCSTrajectoryOptimization::AddTimeCost(double weight) {

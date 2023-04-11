@@ -349,44 +349,21 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             cls_doc.AddPathLengthCost.doc);
   }
 
-  // GCSTrajectoryOptimizationOptions
-  {
-    const auto& cls_doc = doc.GCSTrajectoryOptimizationOptions;
-    py::class_<GCSTrajectoryOptimizationOptions> bezier_gcs_options(
-        m, "GCSTrajectoryOptimizationOptions", cls_doc.doc);
-    bezier_gcs_options
-        .def(py::init<int>(), py::arg("dimension"), cls_doc.ctor.doc)
-        .def_readwrite("d_max", &GCSTrajectoryOptimizationOptions::d_max,
-            cls_doc.d_max.doc)
-        .def_readwrite("d_min", &GCSTrajectoryOptimizationOptions::d_min,
-            cls_doc.d_min.doc)
-        .def_readwrite("dimension",
-            &GCSTrajectoryOptimizationOptions::dimension, cls_doc.dimension.doc)
-        .def("__repr__", [](const GCSTrajectoryOptimizationOptions& self) {
-          return py::str(
-              "GCSTrajectoryOptimizationOptions("
-              "d_max={}, "
-              "d_min={}, "
-              "dimension={}, "
-              ")")
-              .format(self.d_max, self.d_min, self.dimension);
-        });
-  }
-
   {
     using Class = GCSTrajectoryOptimization;
     constexpr auto& cls_doc = doc.GCSTrajectoryOptimization;
     auto gcs_traj_opt =
         py::class_<Class>(m, "GCSTrajectoryOptimization", cls_doc.doc)
-            .def(py::init<const GCSTrajectoryOptimizationOptions&>(),
-                py::arg("options"), "")
+            .def(py::init<int>(), py::arg("dimension"), "")
             .def("num_positions", &Class::num_positions,
                 cls_doc.num_positions.doc)
             .def("GetGraphvizString", &Class::GetGraphvizString,
                 py::arg("show_slacks") = true, py::arg("precision") = 3,
                 py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
             .def("AddRegions", &Class::AddRegions, py::arg("regions"),
-                py::arg("order"), py::arg("name") = "", cls_doc.AddRegions.doc)
+                py::arg("order"), py::arg("d_min") = 1e-6,
+                py::arg("d_max") = 20, py::arg("name") = "",
+                cls_doc.AddRegions.doc)
             .def("AddEdges", &Class::AddEdges, py::arg("from"), py::arg("to"),
                 py::arg("subspace") = py::none(), cls_doc.AddEdges.doc)
             .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,

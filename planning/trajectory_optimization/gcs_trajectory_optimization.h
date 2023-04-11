@@ -26,24 +26,6 @@ using Edge = geometry::optimization::GraphOfConvexSets::Edge;
 using solvers::Constraint;
 using solvers::Cost;
 
-struct GCSTrajectoryOptimizationOptions {
-  GCSTrajectoryOptimizationOptions(int dim) : dimension(dim) {}
-
-  /** The maximum duration spend in a region (seconds).
-  Some solvers struggle numerically with large values.
-  */
-  double d_max{20};
-
-  /** Some cost and constraints are only convex for d > 0.
-  For example the perspective quadratic cost of the path energy ||ṙ(s)||² / d
-  becomes non-convex for d = 0. Otherwise d_min can be set to 0.
-  */
-  double d_min{1e-6};
-
-  /** Dimension of the configuration space.*/
-  int dimension;
-};
-
 /**
 GCSTrajectoryOptimization implements a simplified motion planning optimization
 problem introduced in the paper "Motion Planning around Obstacles with Convex
@@ -65,11 +47,9 @@ class GCSTrajectoryOptimization {
 
   /**
   Constructs the motion planning problem.
-
-  @param gcs_options includes settings to control the construction of the
-  construction of the graph of convex sets.
+  @param dimension of the configuration space.
   */
-  GCSTrajectoryOptimization(const GCSTrajectoryOptimizationOptions& options);
+  GCSTrajectoryOptimization(int dimension);
 
   class Subgraph final {
    public:
@@ -175,9 +155,10 @@ class GCSTrajectoryOptimization {
 
    private:
     // construct a new subgraph
-    Subgraph(const ConvexSets& regions, int order,
-             std::vector<std::pair<int, int>>& regions_to_connect,
-             const std::string& name, GCSTrajectoryOptimization* gcs);
+    Subgraph(const ConvexSets& regions,
+             std::vector<std::pair<int, int>>& regions_to_connect, int order,
+             double d_min, double d_max, const std::string& name,
+             GCSTrajectoryOptimization* gcs);
 
     const ConvexSets regions_;
     int order_;
@@ -218,7 +199,7 @@ class GCSTrajectoryOptimization {
   };
 
   /** Returns the number of position variables. */
-  int num_positions() const { return options_.dimension; };
+  int num_positions() const { return dimension_; };
 
   /**
   @param show_slacks determines whether the values of the intermediate
@@ -237,9 +218,16 @@ class GCSTrajectoryOptimization {
   /** Creates a Subgraph with the given regions.
   @param regions represent the valid set a control point can be in.
   @param order is the order of the Bézier curve.
+  @param d_max is the maximum duration spend in a region (seconds).
+    Some solvers struggle numerically with large values.
+  @param d_min is the minimum duration spend in a region (seconds).
+    Some cost and constraints are only convex for d > 0. For example the
+  perspective quadratic cost of the path energy ||ṙ(s)||² / d becomes non-convex
+  for d = 0. Otherwise d_min can be set to 0.
   @name is the name of the subgraph. A default name will be provided.
   */
   Subgraph* AddRegions(const ConvexSets& regions, int order,
+                       double d_min = 1e-6, double d_max = 20,
                        std::string name = "") {
     if (name.empty()) {
       name = fmt::format("S{}", subgraphs_.size());
@@ -256,8 +244,8 @@ class GCSTrajectoryOptimization {
       }
     }
 
-    subgraphs_.emplace_back(
-        new Subgraph(regions, order, edges_between_regions, name, this));
+    subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
+                                         d_min, d_max, name, this));
 
     max_order_ = std::max(max_order_, subgraphs_.back()->order());
     return subgraphs_.back().get();
@@ -358,7 +346,6 @@ class GCSTrajectoryOptimization {
 
  private:
   int max_order_ = 0;
-  HPolyhedron time_scaling_set_{};
   // store the subgraphs by reference
   std::vector<std::unique_ptr<Subgraph>> subgraphs_{};
   std::vector<std::unique_ptr<SubgraphEdges>> subgraph_edges_{};
@@ -369,7 +356,7 @@ class GCSTrajectoryOptimization {
   std::vector<std::pair<Eigen::VectorXd, Eigen::VectorXd>>
       global_velocity_bounds_{};
 
-  GCSTrajectoryOptimizationOptions options_;
+  int dimension_;
 
   GraphOfConvexSets gcs_{GraphOfConvexSets()};
 };
