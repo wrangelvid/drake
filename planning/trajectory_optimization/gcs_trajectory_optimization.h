@@ -4,7 +4,8 @@
 #include <tuple>
 #include <vector>
 
-#include "drake/common/trajectories/bspline_trajectory.h"
+#include "drake/common/trajectories/bezier_curve.h"
+#include "drake/common/trajectories/composite_trajectory.h"
 #include "drake/geometry/optimization/convex_set.h"
 #include "drake/geometry/optimization/graph_of_convex_sets.h"
 #include "drake/geometry/optimization/hpolyhedron.h"
@@ -172,7 +173,7 @@ class GCSTrajectoryOptimization {
     Eigen::VectorX<symbolic::Variable> u_vars_;
 
     // r(s)
-    trajectories::BsplineTrajectory<symbolic::Expression> u_r_trajectory_;
+    trajectories::BezierCurve<symbolic::Expression> u_r_trajectory_;
 
     friend class GCSTrajectoryOptimization;
   };
@@ -209,11 +210,11 @@ class GCSTrajectoryOptimization {
 
     Eigen::VectorX<symbolic::Variable> u_duration_;
     Eigen::VectorX<symbolic::Variable> u_vars_;
-    trajectories::BsplineTrajectory<symbolic::Expression> u_r_trajectory_;
+    trajectories::BezierCurve<symbolic::Expression> u_r_trajectory_;
 
     Eigen::VectorX<symbolic::Variable> v_duration_;
     Eigen::VectorX<symbolic::Variable> v_vars_;
-    trajectories::BsplineTrajectory<symbolic::Expression> v_r_trajectory_;
+    trajectories::BezierCurve<symbolic::Expression> v_r_trajectory_;
 
     friend class GCSTrajectoryOptimization;
   };
@@ -266,8 +267,6 @@ class GCSTrajectoryOptimization {
 
     subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
                                          d_min, d_max, name, this));
-
-    max_order_ = std::max(max_order_, subgraphs_.back()->order());
     return subgraphs_.back().get();
   }
 
@@ -360,12 +359,11 @@ class GCSTrajectoryOptimization {
   void AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
                          const Eigen::Ref<const Eigen::VectorXd>& ub);
 
-  trajectories::BsplineTrajectory<double> SolvePath(
+  trajectories::CompositeTrajectory<double> SolvePath(
       Subgraph& source, Subgraph& target,
       const GraphOfConvexSetsOptions& options);
 
  private:
-  int max_order_ = 0;
   // store the subgraphs by reference
   std::vector<std::unique_ptr<Subgraph>> subgraphs_{};
   std::vector<std::unique_ptr<SubgraphEdges>> subgraph_edges_{};

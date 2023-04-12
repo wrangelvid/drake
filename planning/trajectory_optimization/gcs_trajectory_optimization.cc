@@ -22,7 +22,6 @@ using Eigen::VectorXd;
 using geometry::optimization::CartesianProduct;
 using geometry::optimization::HPolyhedron;
 using geometry::optimization::Point;
-using math::BsplineBasis;
 using math::EigenToStdVector;
 using solvers::Binding;
 using solvers::L2NormCost;
@@ -36,7 +35,9 @@ using symbolic::DecomposeLinearExpressions;
 using symbolic::Expression;
 using symbolic::MakeMatrixContinuousVariable;
 using symbolic::MakeVectorContinuousVariable;
-using trajectories::BsplineTrajectory;
+using trajectories::BezierCurve;
+using trajectories::CompositeTrajectory;
+using trajectories::Trajectory;
 using Edge = geometry::optimization::GraphOfConvexSets::Edge;
 using VertexId = geometry::optimization::GraphOfConvexSets::VertexId;
 using EdgeId = geometry::optimization::GraphOfConvexSets::EdgeId;
@@ -80,20 +81,15 @@ Subgraph::Subgraph(const ConvexSets& regions,
   auto edge_vars = solvers::ConcatenateVariableRefList(
       {u_control_vars, u_duration_, v_control_vars, v_duration});
 
-  u_r_trajectory_ = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(order_ + 1, order_ + 1,
-                               math::KnotVectorType::kClampedUniform, 0, 1),
-      EigenToStdVector<Expression>(u_control.cast<Expression>()));
+  u_r_trajectory_ = BezierCurve<Expression>(0, 1, u_control.cast<Expression>());
 
-  auto v_r_trajectory = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(order_ + 1, order_ + 1,
-                               math::KnotVectorType::kClampedUniform, 0, 1),
-      EigenToStdVector<Expression>(v_control.cast<Expression>()));
+  auto v_r_trajectory =
+      BezierCurve<Expression>(0, 1, v_control.cast<Expression>());
 
   // Zeroth order continuity constraints.
   const Eigen::VectorX<Expression> path_continuity_error =
-      v_r_trajectory.control_points().front() -
-      u_r_trajectory_.control_points().back();
+      v_r_trajectory.control_points().col(0) -
+      u_r_trajectory_.control_points().col(order);
   Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
   DecomposeLinearExpressions(path_continuity_error, edge_vars, &M);
 
@@ -179,13 +175,13 @@ void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
   }
 
   auto u_rdot_control =
-      dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+      dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
           u_r_trajectory_.MakeDerivative())
           ->control_points();
 
-  for (size_t i = 0; i < u_rdot_control.size(); i++) {
-    Eigen::MatrixXd M(u_rdot_control[i].rows(), u_vars_.size());
-    DecomposeLinearExpressions(u_rdot_control[i] / order(), u_vars_, &M);
+  for (int i = 0; i < u_rdot_control.cols(); i++) {
+    Eigen::MatrixXd M(gcs_->num_positions(), u_vars_.size());
+    DecomposeLinearExpressions(u_rdot_control.col(i) / order(), u_vars_, &M);
 
     auto path_length_cost = std::make_shared<L2NormCost>(
         weight_matrix * M, Eigen::VectorXd::Zero(gcs_->num_positions()));
@@ -218,16 +214,16 @@ void Subgraph::AddPathEnergyCost(const Eigen::MatrixXd& weight_matrix) {
   auto sqrt_weight_matrix = weight_matrix.cwiseSqrt();
 
   auto u_rdot_control =
-      dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+      dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
           u_r_trajectory_.MakeDerivative())
           ->control_points();
 
   Eigen::MatrixXd b_ctrl(u_duration_.rows(), u_vars_.size());
   DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_, &b_ctrl);
 
-  for (size_t i = 0; i < u_rdot_control.size(); i++) {
-    Eigen::MatrixXd A_ctrl(u_rdot_control[i].rows(), u_vars_.size());
-    DecomposeLinearExpressions(u_rdot_control[i], u_vars_, &A_ctrl);
+  for (int i = 0; i < u_rdot_control.cols(); i++) {
+    Eigen::MatrixXd A_ctrl(gcs_->num_positions(), u_vars_.size());
+    DecomposeLinearExpressions(u_rdot_control.col(i), u_vars_, &A_ctrl);
     Eigen::MatrixXd A(1 + gcs_->num_positions(), A_ctrl.cols());
     A << order() * b_ctrl, sqrt_weight_matrix * A_ctrl;
 
@@ -262,16 +258,16 @@ void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
   // constraints for all t.
 
   auto u_rdot_control =
-      dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+      dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
           u_r_trajectory_.MakeDerivative())
           ->control_points();
 
   Eigen::MatrixXd b_ctrl(u_duration_.rows(), u_vars_.size());
   DecomposeLinearExpressions(u_duration_.cast<Expression>(), u_vars_, &b_ctrl);
 
-  for (size_t i = 0; i < u_rdot_control.size(); i++) {
-    Eigen::MatrixXd A_ctrl(u_rdot_control[i].rows(), u_vars_.size());
-    DecomposeLinearExpressions(u_rdot_control[i], u_vars_, &A_ctrl);
+  for (int i = 0; i < u_rdot_control.cols(); i++) {
+    Eigen::MatrixXd A_ctrl(gcs_->num_positions(), u_vars_.size());
+    DecomposeLinearExpressions(u_rdot_control.col(i), u_vars_, &A_ctrl);
     Eigen::MatrixXd A(2 * gcs_->num_positions(), A_ctrl.cols());
     A << A_ctrl - ub * b_ctrl, -A_ctrl + lb * b_ctrl;
 
@@ -320,20 +316,14 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
   auto edge_vars = solvers::ConcatenateVariableRefList(
       {u_control_vars, u_duration_, v_control_vars, v_duration_});
 
-  u_r_trajectory_ = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(from->order() + 1, from->order() + 1,
-                               math::KnotVectorType::kClampedUniform, 0, 1),
-      EigenToStdVector<Expression>(u_control.cast<Expression>()));
+  u_r_trajectory_ = BezierCurve<Expression>(0, 1, u_control.cast<Expression>());
 
-  v_r_trajectory_ = BsplineTrajectory<Expression>(
-      BsplineBasis<Expression>(to->order() + 1, to->order() + 1,
-                               math::KnotVectorType::kClampedUniform, 0, 1),
-      EigenToStdVector<Expression>(v_control.cast<Expression>()));
+  v_r_trajectory_ = BezierCurve<Expression>(0, 1, v_control.cast<Expression>());
 
   // Zeroth order continuity constraints.
   const Eigen::VectorX<Expression> path_continuity_error =
-      v_r_trajectory_.control_points().front() -
-      u_r_trajectory_.control_points().back();
+      v_r_trajectory_.control_points().col(0) -
+      u_r_trajectory_.control_points().col(from->order());
   Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
   DecomposeLinearExpressions(path_continuity_error, edge_vars, &M);
 
@@ -425,7 +415,7 @@ void SubgraphEdges::AddVelocityBounds(
   if (from_->order() > 0) {
     // Add velocity bounds to the last control point of the u set.
     auto u_rdot_control =
-        dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+        dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
             u_r_trajectory_.MakeDerivative())
             ->control_points();
 
@@ -434,8 +424,8 @@ void SubgraphEdges::AddVelocityBounds(
                                &b_ctrl);
 
     // Last control point velocity constraint.
-    Eigen::MatrixXd M(u_rdot_control[0].rows(), u_vars_.size());
-    DecomposeLinearExpressions(u_rdot_control[u_rdot_control.size() - 1],
+    Eigen::MatrixXd M(gcs_->num_positions(), u_vars_.size());
+    DecomposeLinearExpressions(u_rdot_control.col(u_rdot_control.cols() - 1),
                                u_vars_, &M);
     Eigen::MatrixXd A_last(2 * gcs_->num_positions(), M.cols());
     A_last << M - ub * b_ctrl, -M + lb * b_ctrl;
@@ -453,7 +443,7 @@ void SubgraphEdges::AddVelocityBounds(
   if (to_->order() > 0) {
     // Add velocity bounds to the first control point of the v set.
     auto v_rdot_control =
-        dynamic_pointer_cast_or_throw<BsplineTrajectory<symbolic::Expression>>(
+        dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
             v_r_trajectory_.MakeDerivative())
             ->control_points();
 
@@ -462,8 +452,8 @@ void SubgraphEdges::AddVelocityBounds(
                                &b_ctrl);
 
     // First control point velocity constraint.
-    Eigen::MatrixXd M(v_rdot_control[0].rows(), v_vars_.size());
-    DecomposeLinearExpressions(v_rdot_control[0], v_vars_, &M);
+    Eigen::MatrixXd M(gcs_->num_positions(), v_vars_.size());
+    DecomposeLinearExpressions(v_rdot_control.col(0), v_vars_, &M);
     Eigen::MatrixXd A_first(2 * gcs_->num_positions(), M.cols());
     A_first << M - ub * b_ctrl, -M + lb * b_ctrl;
 
@@ -525,7 +515,7 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
   global_velocity_bounds_.push_back({lb, ub});
 }
 
-BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
+CompositeTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     Subgraph& source, Subgraph& target,
     const GraphOfConvexSetsOptions& options) {
   Eigen::VectorXd empty_vector;
@@ -613,52 +603,50 @@ BsplineTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     }
   }
 
-  // Extract the path from the edges.
-  std::vector<double> path_times(max_order_ + 1, 0.0);
-  std::vector<Eigen::MatrixX<double>> control_points;
-  for (auto& edge : path_edges) {
-    // Extract the control points from the solution.
-    // Sometimes the solution goes through a point which has a single control
-    // point.
-    int num_control_points = (edge->xv().size() - 1) / num_positions();
-    Eigen::MatrixX<double> edge_path_points =
-        Eigen::Map<Eigen::MatrixX<double>>(
-            result.GetSolution(edge->xv()).data(), num_positions(),
-            num_control_points);
-    for (int i = 0; i < max_order_ + 1; ++i) {
-      if (i < edge_path_points.cols()) {
-        control_points.push_back(edge_path_points.col(i));
-      } else {
-        control_points.push_back(
-            edge_path_points.col(edge_path_points.cols() - 1));
-      }
-    }
-
-    if (edge->v().id() == target_id) {
-      std::vector<double> next_path_times(max_order_ + 1, path_times.back());
-      path_times.insert(path_times.end(), next_path_times.begin(),
-                        next_path_times.end());
-      break;
-    }
-
-    // Extract the duration from the solution.
-    double duration = result.GetSolution(edge->xv()).tail<1>().value();
-    std::vector<double> next_path_times(max_order_ + 1,
-                                        path_times.back() + duration);
-    path_times.insert(path_times.end(), next_path_times.begin(),
-                      next_path_times.end());
-  }
-
+  // Remove the dummy edges from the path.
   if (dummy_source != nullptr) {
+    path_edges.erase(path_edges.begin());
     gcs_.RemoveVertex(dummy_source->id());
   }
 
   if (dummy_target != nullptr) {
+    path_edges.erase(path_edges.end() - 1);
     gcs_.RemoveVertex(dummy_target->id());
   }
 
-  return BsplineTrajectory<double>(BsplineBasis(max_order_ + 1, path_times),
-                                   control_points);
+  // Extract the path from the edges.
+  std::vector<copyable_unique_ptr<Trajectory<double>>> bezier_curves{};
+  for (auto& edge : path_edges) {
+    // Extract the control points from the solution.
+    int num_control_points = (edge->xu().size() - 1) / num_positions();
+    Eigen::MatrixX<double> edge_path_points =
+        Eigen::Map<Eigen::MatrixX<double>>(
+            result.GetSolution(edge->xu()).data(), num_positions(),
+            num_control_points);
+
+    // Extract the duration from the solution.
+    double duration = result.GetSolution(edge->xu()).tail<1>().value();
+    double start_time =
+        bezier_curves.empty() ? 0 : bezier_curves.back()->end_time();
+    bezier_curves.emplace_back(std::make_unique<BezierCurve<double>>(
+        start_time, start_time + duration, edge_path_points));
+  }
+
+  // Get the final control points from the solution.
+  int num_control_points =
+      (path_edges.back()->xv().size() - 1) / num_positions();
+  Eigen::MatrixX<double> edge_path_points = Eigen::Map<Eigen::MatrixX<double>>(
+      result.GetSolution(path_edges.back()->xv()).data(), num_positions(),
+      num_control_points);
+
+  double duration =
+      result.GetSolution(path_edges.back()->xv()).tail<1>().value();
+  double start_time =
+      bezier_curves.empty() ? 0 : bezier_curves.back()->end_time();
+  bezier_curves.emplace_back(std::make_unique<BezierCurve<double>>(
+      start_time, start_time + duration, edge_path_points));
+
+  return CompositeTrajectory<double>(bezier_curves);
 }
 
 }  // namespace trajectory_optimization

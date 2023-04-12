@@ -107,7 +107,8 @@ drake_cc_library(
     hdrs = ["gcs_trajectory_optimization.h"],
     deps = [
        "//common",
-       "//common/trajectories:bspline_trajectory",
+       "//common/trajectories:bezier_curve",
+       "//common/trajectories:composite_trajectory",
        "//geometry/optimization:graph_of_convex_sets", 
     ],
 )
