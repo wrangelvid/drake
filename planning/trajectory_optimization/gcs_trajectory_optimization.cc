@@ -515,9 +515,9 @@ void GCSTrajectoryOptimization::AddVelocityBounds(
   global_velocity_bounds_.push_back({lb, ub});
 }
 
-CompositeTrajectory<double> GCSTrajectoryOptimization::SolvePath(
-    Subgraph& source, Subgraph& target,
-    const GraphOfConvexSetsOptions& options) {
+std::pair<CompositeTrajectory<double>, solvers::MathematicalProgramResult>
+GCSTrajectoryOptimization::SolvePath(Subgraph& source, Subgraph& target,
+                                     const GraphOfConvexSetsOptions& options) {
   Eigen::VectorXd empty_vector;
   VertexId source_id = source.vertices()[0]->id();
   Vertex* dummy_source = nullptr;
@@ -554,7 +554,7 @@ CompositeTrajectory<double> GCSTrajectoryOptimization::SolvePath(
     if (dummy_target != nullptr) {
       gcs_.RemoveVertex(dummy_target->id());
     }
-    throw std::runtime_error("GCS failed to find a path.");
+    return {CompositeTrajectory<double>({}), result};
   }
 
   // Extract the flow from the solution.
@@ -646,7 +646,7 @@ CompositeTrajectory<double> GCSTrajectoryOptimization::SolvePath(
   bezier_curves.emplace_back(std::make_unique<BezierCurve<double>>(
       start_time, start_time + duration, edge_path_points));
 
-  return CompositeTrajectory<double>(bezier_curves);
+  return {CompositeTrajectory<double>(bezier_curves), result};
 }
 
 }  // namespace trajectory_optimization

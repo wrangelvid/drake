@@ -359,9 +359,10 @@ class GCSTrajectoryOptimization {
   void AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
                          const Eigen::Ref<const Eigen::VectorXd>& ub);
 
-  trajectories::CompositeTrajectory<double> SolvePath(
-      Subgraph& source, Subgraph& target,
-      const GraphOfConvexSetsOptions& options);
+  std::pair<trajectories::CompositeTrajectory<double>,
+            solvers::MathematicalProgramResult>
+  SolvePath(Subgraph& source, Subgraph& target,
+            const GraphOfConvexSetsOptions& options);
 
  private:
   // store the subgraphs by reference
