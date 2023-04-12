@@ -20,15 +20,20 @@ using SubgraphEdges = GCSTrajectoryOptimization::SubgraphEdges;
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using geometry::optimization::CartesianProduct;
+using geometry::optimization::ConvexSet;
+using geometry::optimization::ConvexSets;
+using geometry::optimization::GraphOfConvexSets;
+using geometry::optimization::GraphOfConvexSetsOptions;
 using geometry::optimization::HPolyhedron;
 using geometry::optimization::Point;
 using math::EigenToStdVector;
 using solvers::Binding;
+using solvers::Constraint;
+using solvers::Cost;
 using solvers::L2NormCost;
 using solvers::LinearConstraint;
 using solvers::LinearCost;
 using solvers::LinearEqualityConstraint;
-using solvers::LorentzConeConstraint;
 using solvers::PerspectiveQuadraticCost;
 using std::numeric_limits;
 using symbolic::DecomposeLinearExpressions;
@@ -38,11 +43,10 @@ using symbolic::MakeVectorContinuousVariable;
 using trajectories::BezierCurve;
 using trajectories::CompositeTrajectory;
 using trajectories::Trajectory;
+using Vertex = geometry::optimization::GraphOfConvexSets::Vertex;
 using Edge = geometry::optimization::GraphOfConvexSets::Edge;
 using VertexId = geometry::optimization::GraphOfConvexSets::VertexId;
 using EdgeId = geometry::optimization::GraphOfConvexSets::EdgeId;
-using drake::geometry::optimization::ConvexSets;
-using geometry::optimization::GraphOfConvexSetsOptions;
 
 const double inf = std::numeric_limits<double>::infinity();
 
@@ -193,6 +197,13 @@ void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
   }
 }
 
+void Subgraph::AddPathLengthCost(double weight) {
+  auto weight_matrix =
+      weight *
+      Eigen::MatrixXd::Identity(gcs_->num_positions(), gcs_->num_positions());
+  return Subgraph::AddPathLengthCost(weight_matrix);
+}
+
 void Subgraph::AddPathEnergyCost(const Eigen::MatrixXd& weight_matrix) {
   /*
     We will upper bound the path integral by the sum of the distances between
@@ -235,6 +246,13 @@ void Subgraph::AddPathEnergyCost(const Eigen::MatrixXd& weight_matrix) {
       v->AddCost(Binding<PerspectiveQuadraticCost>(energy_cost, v->x()));
     }
   }
+}
+
+void Subgraph::AddPathEnergyCost(double weight) {
+  auto weight_matrix =
+      weight *
+      Eigen::MatrixXd::Identity(gcs_->num_positions(), gcs_->num_positions());
+  return Subgraph::AddPathEnergyCost(weight_matrix);
 }
 
 void Subgraph::AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
@@ -468,11 +486,49 @@ void SubgraphEdges::AddVelocityBounds(
   }
 }
 
-GCSTrajectoryOptimization::GCSTrajectoryOptimization(int dimension) {
-  if (dimension < 1) {
+GCSTrajectoryOptimization::GCSTrajectoryOptimization(int positions) {
+  if (positions < 1) {
     throw std::runtime_error("Dimension must be greater than 0.");
   }
-  dimension_ = dimension;
+  positions_ = positions;
+}
+
+Subgraph* GCSTrajectoryOptimization::AddRegions(
+    const geometry::optimization::ConvexSets& regions,
+    std::vector<std::pair<int, int>>& edges_between_regions, int order,
+    double d_min, double d_max, std::string name) {
+  subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
+                                       d_min, d_max, name, this));
+  return subgraphs_.back().get();
+}
+
+Subgraph* GCSTrajectoryOptimization::AddRegions(
+    const geometry::optimization::ConvexSets& regions, int order, double d_min,
+    double d_max, std::string name) {
+  if (name.empty()) {
+    name = fmt::format("S{}", subgraphs_.size());
+  }
+  // TODO(wrangelvid): This is O(n^2) and can be improved.
+  std::vector<std::pair<int, int>> edges_between_regions;
+  for (size_t i = 0; i < regions.size(); i++) {
+    for (size_t j = i + 1; j < regions.size(); j++) {
+      if (regions[i]->IntersectsWith(*regions[j])) {
+        // Regions are overlapping, add edge.
+        edges_between_regions.emplace_back(i, j);
+        edges_between_regions.emplace_back(j, i);
+      }
+    }
+  }
+
+  return GCSTrajectoryOptimization::AddRegions(regions, edges_between_regions,
+                                               order, d_min, d_max, name);
+}
+
+SubgraphEdges* GCSTrajectoryOptimization::AddEdges(
+    const Subgraph* from, const Subgraph* to,
+    const geometry::optimization::ConvexSet* subspace) {
+  subgraph_edges_.emplace_back(new SubgraphEdges(from, to, subspace, this));
+  return subgraph_edges_.back().get();
 }
 
 void GCSTrajectoryOptimization::AddTimeCost(double weight) {
@@ -494,6 +550,12 @@ void GCSTrajectoryOptimization::AddPathLengthCost(
   global_path_length_costs_.push_back(weight_matrix);
 }
 
+void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
+  auto weight_matrix =
+      weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
+  return GCSTrajectoryOptimization::AddPathLengthCost(weight_matrix);
+};
+
 void GCSTrajectoryOptimization::AddPathEnergyCost(
     const Eigen::MatrixXd& weight_matrix) {
   for (auto& subgraph : subgraphs_) {
@@ -503,6 +565,12 @@ void GCSTrajectoryOptimization::AddPathEnergyCost(
   }
   global_path_energy_costs_.push_back(weight_matrix);
 }
+
+void GCSTrajectoryOptimization::AddPathEnergyCost(double weight) {
+  auto weight_matrix =
+      weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
+  return GCSTrajectoryOptimization::AddPathEnergyCost(weight_matrix);
+};
 
 void GCSTrajectoryOptimization::AddVelocityBounds(
     const Eigen::Ref<const Eigen::VectorXd>& lb,

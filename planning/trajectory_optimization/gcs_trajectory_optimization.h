@@ -8,24 +8,10 @@
 #include "drake/common/trajectories/composite_trajectory.h"
 #include "drake/geometry/optimization/convex_set.h"
 #include "drake/geometry/optimization/graph_of_convex_sets.h"
-#include "drake/geometry/optimization/hpolyhedron.h"
-#include "drake/geometry/optimization/point.h"
 
 namespace drake {
 namespace planning {
 namespace trajectory_optimization {
-
-using drake::geometry::optimization::ConvexSets;
-using geometry::optimization::ConvexSet;
-using geometry::optimization::GraphOfConvexSets;
-using geometry::optimization::GraphOfConvexSetsOptions;
-using geometry::optimization::HPolyhedron;
-using geometry::optimization::Point;
-using VertexId = geometry::optimization::GraphOfConvexSets::VertexId;
-using Vertex = geometry::optimization::GraphOfConvexSets::Vertex;
-using Edge = geometry::optimization::GraphOfConvexSets::Edge;
-using solvers::Constraint;
-using solvers::Cost;
 
 /**
 GCSTrajectoryOptimization implements a simplified motion planning optimization
@@ -48,9 +34,9 @@ class GCSTrajectoryOptimization {
 
   /**
   Constructs the motion planning problem.
-  @param dimension of the configuration space.
+  @param positions is the dimension of the configuration space.
   */
-  GCSTrajectoryOptimization(int dimension);
+  GCSTrajectoryOptimization(int positions);
 
   class Subgraph final {
    public:
@@ -69,7 +55,9 @@ class GCSTrajectoryOptimization {
 
     /** Returns the regions associated with this subgraph before the
      * CartesianProduct.*/
-    const ConvexSets& regions() const { return regions_; }
+    const geometry::optimization::ConvexSets& regions() const {
+      return regions_;
+    }
 
     /** Adds a minimum time cost to all vertices and edges in the graph
     The cost is the sum of the time scaling variables.
@@ -99,12 +87,7 @@ class GCSTrajectoryOptimization {
 
     @param weight is the relative weight of the cost.
     */
-    void AddPathLengthCost(double weight = 1.0) {
-      auto weight_matrix =
-          weight * Eigen::MatrixXd::Identity(gcs_->num_positions(),
-                                             gcs_->num_positions());
-      return Subgraph::AddPathLengthCost(weight_matrix);
-    };
+    void AddPathLengthCost(double weight = 1.0);
 
     /** Adds multiple Perspective Quadratic Costs on the upper bound of the path
     energy. We upper bound the path integral by the sum of the distances between
@@ -133,12 +116,7 @@ class GCSTrajectoryOptimization {
 
     @param weight is the relative weight of the cost.
     */
-    void AddPathEnergyCost(double weight = 1.0) {
-      auto weight_matrix =
-          weight * Eigen::MatrixXd::Identity(gcs_->num_positions(),
-                                             gcs_->num_positions());
-      return Subgraph::AddPathEnergyCost(weight_matrix);
-    };
+    void AddPathEnergyCost(double weight = 1.0);
 
     /** Adds a linear velocity constraints to the subgraph `lb` ≤ q̈(t) ≤
     `ub`.
@@ -150,24 +128,30 @@ class GCSTrajectoryOptimization {
 
    private:
     // construct a new subgraph
-    Subgraph(const ConvexSets& regions,
+    Subgraph(const geometry::optimization::ConvexSets& regions,
              std::vector<std::pair<int, int>>& regions_to_connect, int order,
              double d_min, double d_max, const std::string& name,
              GCSTrajectoryOptimization* gcs);
 
     /** Returns all vertices associated with this subgraph.*/
-    const std::vector<Vertex*>& vertices() const { return vertices_; }
+    const std::vector<geometry::optimization::GraphOfConvexSets::Vertex*>&
+    vertices() const {
+      return vertices_;
+    }
 
-    /** Returns all edges within this subgraph.*/
-    const std::vector<Edge*>& edges() const { return edges_; }
+    /** Returns all Edges within this subgraph.*/
+    const std::vector<geometry::optimization::GraphOfConvexSets::Edge*>& edges()
+        const {
+      return edges_;
+    }
 
-    const ConvexSets regions_;
+    const geometry::optimization::ConvexSets regions_;
     int order_;
     const std::string name_;
     GCSTrajectoryOptimization* gcs_;
 
-    std::vector<Vertex*> vertices_;
-    std::vector<Edge*> edges_;
+    std::vector<geometry::optimization::GraphOfConvexSets::Vertex*> vertices_;
+    std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
 
     Eigen::VectorX<symbolic::Variable> u_duration_;
     Eigen::VectorX<symbolic::Variable> u_vars_;
@@ -195,18 +179,24 @@ class GCSTrajectoryOptimization {
 
    private:
     SubgraphEdges(const Subgraph* from, const Subgraph* to,
-                  const ConvexSet* subspace, GCSTrajectoryOptimization* gcs);
+                  const geometry::optimization::ConvexSet* subspace,
+                  GCSTrajectoryOptimization* gcs);
 
-    bool RegionsConnectThroughSubspace(const ConvexSet& A, const ConvexSet& B,
-                                       const ConvexSet& subspace);
+    bool RegionsConnectThroughSubspace(
+        const geometry::optimization::ConvexSet& A,
+        const geometry::optimization::ConvexSet& B,
+        const geometry::optimization::ConvexSet& subspace);
 
-    const std::vector<Edge*>& edges() const { return edges_; }
+    const std::vector<geometry::optimization::GraphOfConvexSets::Edge*>& edges()
+        const {
+      return edges_;
+    }
 
     const Subgraph* from_;
     const Subgraph* to_;
     GCSTrajectoryOptimization* gcs_;
 
-    std::vector<Edge*> edges_;
+    std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
 
     Eigen::VectorX<symbolic::Variable> u_duration_;
     Eigen::VectorX<symbolic::Variable> u_vars_;
@@ -220,7 +210,7 @@ class GCSTrajectoryOptimization {
   };
 
   /** Returns the number of position variables. */
-  int num_positions() const { return dimension_; };
+  int num_positions() const { return positions_; };
 
   /**
   @param show_slacks determines whether the values of the intermediate
@@ -247,14 +237,10 @@ class GCSTrajectoryOptimization {
   for d = 0. Otherwise d_min can be set to 0.
   @name is the name of the subgraph. A default name will be provided.
   */
-  Subgraph* AddRegions(const ConvexSets& regions,
+  Subgraph* AddRegions(const geometry::optimization::ConvexSets& regions,
                        std::vector<std::pair<int, int>>& edges_between_regions,
                        int order, double d_min = 1e-6, double d_max = 20,
-                       std::string name = "") {
-    subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
-                                         d_min, d_max, name, this));
-    return subgraphs_.back().get();
-  }
+                       std::string name = "");
 
   /** Creates a Subgraph with the given regions.
   @param regions represent the valid set a control point can be in.
@@ -267,27 +253,9 @@ class GCSTrajectoryOptimization {
   for d = 0. Otherwise d_min can be set to 0.
   @name is the name of the subgraph. A default name will be provided.
   */
-  Subgraph* AddRegions(const ConvexSets& regions, int order,
-                       double d_min = 1e-6, double d_max = 20,
-                       std::string name = "") {
-    if (name.empty()) {
-      name = fmt::format("S{}", subgraphs_.size());
-    }
-    // TODO(wrangelvid): This is O(n^2) and can be improved.
-    std::vector<std::pair<int, int>> edges_between_regions;
-    for (size_t i = 0; i < regions.size(); i++) {
-      for (size_t j = i + 1; j < regions.size(); j++) {
-        if (regions[i]->IntersectsWith(*regions[j])) {
-          // Regions are overlapping, add edge.
-          edges_between_regions.emplace_back(i, j);
-          edges_between_regions.emplace_back(j, i);
-        }
-      }
-    }
-
-    return AddRegions(regions, edges_between_regions, order, d_min, d_max,
-                      name);
-  }
+  Subgraph* AddRegions(const geometry::optimization::ConvexSets& regions,
+                       int order, double d_min = 1e-6, double d_max = 20,
+                       std::string name = "");
 
   /** Connects two subgraphs with directed edges.
   @param from is the subgraph to connect from.
@@ -298,11 +266,9 @@ class GCSTrajectoryOptimization {
   create a subgraph of zero order with the subspace as the region and connect it
   between the two subgraphs.
   */
-  SubgraphEdges* AddEdges(const Subgraph* from, const Subgraph* to,
-                          const ConvexSet* subspace = nullptr) {
-    subgraph_edges_.emplace_back(new SubgraphEdges(from, to, subspace, this));
-    return subgraph_edges_.back().get();
-  }
+  SubgraphEdges* AddEdges(
+      const Subgraph* from, const Subgraph* to,
+      const geometry::optimization::ConvexSet* subspace = nullptr);
 
   /** Adds a minimum time cost to all vertices and edges in the graph
   The cost is the sum of the time scaling variables.
@@ -332,11 +298,7 @@ class GCSTrajectoryOptimization {
 
   @param weight is the relative weight of the cost.
   */
-  void AddPathLengthCost(double weight = 1.0) {
-    auto weight_matrix =
-        weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
-    return GCSTrajectoryOptimization::AddPathLengthCost(weight_matrix);
-  };
+  void AddPathLengthCost(double weight = 1.0);
 
   /** Adds multiple Perspective Quadratic Costs on the upper bound of the path
   energy. We upper bound the path integral by the sum of the distances between
@@ -365,11 +327,7 @@ class GCSTrajectoryOptimization {
 
   @param weight is the relative weight of the cost.
   */
-  void AddPathEnergyCost(double weight = 1.0) {
-    auto weight_matrix =
-        weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
-    return GCSTrajectoryOptimization::AddPathEnergyCost(weight_matrix);
-  };
+  void AddPathEnergyCost(double weight = 1.0);
 
   /** Adds a linear velocity constraints to the whole graph `lb` ≤ q̈(t) ≤ `ub`.
   @param lb is the lower bound of the velocity.
@@ -381,7 +339,7 @@ class GCSTrajectoryOptimization {
   std::pair<trajectories::CompositeTrajectory<double>,
             solvers::MathematicalProgramResult>
   SolvePath(Subgraph& source, Subgraph& target,
-            const GraphOfConvexSetsOptions& options);
+            const geometry::optimization::GraphOfConvexSetsOptions& options);
 
  private:
   // store the subgraphs by reference
@@ -394,9 +352,10 @@ class GCSTrajectoryOptimization {
   std::vector<std::pair<Eigen::VectorXd, Eigen::VectorXd>>
       global_velocity_bounds_{};
 
-  int dimension_;
+  int positions_;
 
-  GraphOfConvexSets gcs_{GraphOfConvexSets()};
+  geometry::optimization::GraphOfConvexSets gcs_{
+      geometry::optimization::GraphOfConvexSets()};
 };
 
 }  // namespace trajectory_optimization

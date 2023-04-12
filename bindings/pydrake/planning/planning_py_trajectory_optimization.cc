@@ -361,7 +361,7 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
                 py::arg("show_slacks") = true, py::arg("precision") = 3,
                 py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
             .def("AddRegions",
-                py::overload_cast<const ConvexSets&,
+                py::overload_cast<const geometry::optimization::ConvexSets&,
                     std::vector<std::pair<int, int>>&, int, double, double,
                     std::string>(&Class::AddRegions),
                 py::arg("regions"), py::arg("edges_between_regions"),
@@ -369,8 +369,8 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
                 py::arg("d_max") = 20, py::arg("name") = "",
                 cls_doc.AddRegions.doc_6args)
             .def("AddRegions",
-                py::overload_cast<const ConvexSets&, int, double, double,
-                    std::string>(&Class::AddRegions),
+                py::overload_cast<const geometry::optimization::ConvexSets&,
+                    int, double, double, std::string>(&Class::AddRegions),
                 py::arg("regions"), py::arg("order"), py::arg("d_min") = 1e-6,
                 py::arg("d_max") = 20, py::arg("name") = "",
                 cls_doc.AddRegions.doc_5args)
