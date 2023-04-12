@@ -399,7 +399,10 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
                 py::arg("ub"), cls_doc.AddVelocityBounds.doc)
             .def("SolvePath", &Class::SolvePath, py::arg("source"),
-                py::arg("target"), py::arg("options"), cls_doc.SolvePath.doc);
+                py::arg("target"),
+                py::arg("options") =
+                    geometry::optimization::GraphOfConvexSetsOptions(),
+                cls_doc.SolvePath.doc);
 
     // Subgraph
     const auto& subgraph_doc = doc.GCSTrajectoryOptimization.Subgraph;

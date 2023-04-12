@@ -73,9 +73,9 @@ Subgraph::Subgraph(const ConvexSets& regions,
   auto v_control =
       MakeMatrixContinuousVariable(gcs_->num_positions(), order_ + 1, "xv");
 
-  auto u_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
+  auto u_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
       u_control.data(), u_control.size());
-  auto v_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
+  auto v_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
       v_control.data(), v_control.size());
 
   u_duration_ = MakeVectorContinuousVariable(1, "Tu");
@@ -91,7 +91,7 @@ Subgraph::Subgraph(const ConvexSets& regions,
       BezierCurve<Expression>(0, 1, v_control.cast<Expression>());
 
   // Zeroth order continuity constraints.
-  const Eigen::VectorX<Expression> path_continuity_error =
+  const VectorX<Expression> path_continuity_error =
       v_r_trajectory.control_points().col(0) -
       u_r_trajectory_.control_points().col(order);
   Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
@@ -321,9 +321,9 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
   auto v_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
                                                 to->order() + 1, "xv");
 
-  auto u_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
+  auto u_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
       u_control.data(), u_control.size());
-  auto v_control_vars = Eigen::Map<Eigen::VectorX<symbolic::Variable>>(
+  auto v_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
       v_control.data(), v_control.size());
 
   u_duration_ = MakeVectorContinuousVariable(1, "Tu");
@@ -339,7 +339,7 @@ SubgraphEdges::SubgraphEdges(const Subgraph* from, const Subgraph* to,
   v_r_trajectory_ = BezierCurve<Expression>(0, 1, v_control.cast<Expression>());
 
   // Zeroth order continuity constraints.
-  const Eigen::VectorX<Expression> path_continuity_error =
+  const VectorX<Expression> path_continuity_error =
       v_r_trajectory_.control_points().col(0) -
       u_r_trajectory_.control_points().col(from->order());
   Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
@@ -687,8 +687,8 @@ GCSTrajectoryOptimization::SolvePath(Subgraph& source, Subgraph& target,
   for (auto& edge : path_edges) {
     // Extract the control points from the solution.
     int num_control_points = (edge->xu().size() - 1) / num_positions();
-    Eigen::MatrixX<double> edge_path_points =
-        Eigen::Map<Eigen::MatrixX<double>>(
+    MatrixX<double> edge_path_points =
+        Eigen::Map<MatrixX<double>>(
             result.GetSolution(edge->xu()).data(), num_positions(),
             num_control_points);
 
@@ -703,7 +703,7 @@ GCSTrajectoryOptimization::SolvePath(Subgraph& source, Subgraph& target,
   // Get the final control points from the solution.
   int num_control_points =
       (path_edges.back()->xv().size() - 1) / num_positions();
-  Eigen::MatrixX<double> edge_path_points = Eigen::Map<Eigen::MatrixX<double>>(
+  MatrixX<double> edge_path_points = Eigen::Map<MatrixX<double>>(
       result.GetSolution(path_edges.back()->xv()).data(), num_positions(),
       num_control_points);
 

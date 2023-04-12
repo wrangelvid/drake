@@ -23,7 +23,7 @@ Mark Petersen, David von Wrangel, Russ Tedrake. https://arxiv.org/abs/2205.04422
 
 Instead of using the full time scaling curve, this problem uses a single time
 scaling variable for each region. This makes enforcing the continuity
-constraints more difficult, but significantly simplifies higher order derivative
+constraints more difficult, but significantly simplifies higher-order derivative
 constraints.
 */
 class GCSTrajectoryOptimization {
@@ -153,8 +153,8 @@ class GCSTrajectoryOptimization {
     std::vector<geometry::optimization::GraphOfConvexSets::Vertex*> vertices_;
     std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
 
-    Eigen::VectorX<symbolic::Variable> u_duration_;
-    Eigen::VectorX<symbolic::Variable> u_vars_;
+    VectorX<symbolic::Variable> u_duration_;
+    VectorX<symbolic::Variable> u_vars_;
 
     // r(s)
     trajectories::BezierCurve<symbolic::Expression> u_r_trajectory_;
@@ -198,12 +198,12 @@ class GCSTrajectoryOptimization {
 
     std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
 
-    Eigen::VectorX<symbolic::Variable> u_duration_;
-    Eigen::VectorX<symbolic::Variable> u_vars_;
+    VectorX<symbolic::Variable> u_duration_;
+    VectorX<symbolic::Variable> u_vars_;
     trajectories::BezierCurve<symbolic::Expression> u_r_trajectory_;
 
-    Eigen::VectorX<symbolic::Variable> v_duration_;
-    Eigen::VectorX<symbolic::Variable> v_vars_;
+    VectorX<symbolic::Variable> v_duration_;
+    VectorX<symbolic::Variable> v_vars_;
     trajectories::BezierCurve<symbolic::Expression> v_r_trajectory_;
 
     friend class GCSTrajectoryOptimization;
@@ -262,7 +262,7 @@ class GCSTrajectoryOptimization {
   @param to is the subgraph to connect to.
   @param subspace is the subspace that the connecting control points must be in.
     Subspace is optional. Only edges that connect through the subspace will be
-  added. Only subspaces of type point or HPolytope are sre supported. Otherwise
+  added. Only subspaces of type point or HPolyhedron are supported. Otherwise
   create a subgraph of zero order with the subspace as the region and connect it
   between the two subgraphs.
   */
@@ -339,7 +339,7 @@ class GCSTrajectoryOptimization {
   std::pair<trajectories::CompositeTrajectory<double>,
             solvers::MathematicalProgramResult>
   SolvePath(Subgraph& source, Subgraph& target,
-            const geometry::optimization::GraphOfConvexSetsOptions& options);
+            const geometry::optimization::GraphOfConvexSetsOptions& options = geometry::optimization::GraphOfConvexSetsOptions());
 
  private:
   // store the subgraphs by reference

@@ -166,6 +166,14 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "gcs_trajectory_optimization_test",
+    deps = [
+        ":gcs_trajectory_optimization",
+        "//common/test_utilities:eigen_matrix_compare",
+    ],
+)
+
+drake_cc_googletest(
     name = "kinematic_trajectory_optimization_test",
     deps = [
         ":kinematic_trajectory_optimization",
