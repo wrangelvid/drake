@@ -236,6 +236,26 @@ class GCSTrajectoryOptimization {
                                   scientific);
   }
 
+  /** Creates a Subgraph with the given regions and indices.
+  @param regions represent the valid set a control point can be in.
+  @param order is the order of the Bézier curve.
+  @param d_max is the maximum duration spend in a region (seconds).
+    Some solvers struggle numerically with large values.
+  @param d_min is the minimum duration spend in a region (seconds).
+    Some cost and constraints are only convex for d > 0. For example the
+  perspective quadratic cost of the path energy ||ṙ(s)||² / d becomes non-convex
+  for d = 0. Otherwise d_min can be set to 0.
+  @name is the name of the subgraph. A default name will be provided.
+  */
+  Subgraph* AddRegions(const ConvexSets& regions,
+                       std::vector<std::pair<int, int>>& edges_between_regions,
+                       int order, double d_min = 1e-6, double d_max = 20,
+                       std::string name = "") {
+    subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
+                                         d_min, d_max, name, this));
+    return subgraphs_.back().get();
+  }
+
   /** Creates a Subgraph with the given regions.
   @param regions represent the valid set a control point can be in.
   @param order is the order of the Bézier curve.
@@ -265,9 +285,8 @@ class GCSTrajectoryOptimization {
       }
     }
 
-    subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions, order,
-                                         d_min, d_max, name, this));
-    return subgraphs_.back().get();
+    return AddRegions(regions, edges_between_regions, order, d_min, d_max,
+                      name);
   }
 
   /** Connects two subgraphs with directed edges.

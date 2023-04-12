@@ -360,10 +360,20 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             .def("GetGraphvizString", &Class::GetGraphvizString,
                 py::arg("show_slacks") = true, py::arg("precision") = 3,
                 py::arg("scientific") = false, cls_doc.GetGraphvizString.doc)
-            .def("AddRegions", &Class::AddRegions, py::arg("regions"),
+            .def("AddRegions",
+                py::overload_cast<const ConvexSets&,
+                    std::vector<std::pair<int, int>>&, int, double, double,
+                    std::string>(&Class::AddRegions),
+                py::arg("regions"), py::arg("edges_between_regions"),
                 py::arg("order"), py::arg("d_min") = 1e-6,
                 py::arg("d_max") = 20, py::arg("name") = "",
-                cls_doc.AddRegions.doc)
+                cls_doc.AddRegions.doc_6args)
+            .def("AddRegions",
+                py::overload_cast<const ConvexSets&, int, double, double,
+                    std::string>(&Class::AddRegions),
+                py::arg("regions"), py::arg("order"), py::arg("d_min") = 1e-6,
+                py::arg("d_max") = 20, py::arg("name") = "",
+                cls_doc.AddRegions.doc_5args)
             .def("AddEdges", &Class::AddEdges, py::arg("from"), py::arg("to"),
                 py::arg("subspace") = py::none(), cls_doc.AddEdges.doc)
             .def("AddTimeCost", &Class::AddTimeCost, py::arg("weight") = 1.0,
