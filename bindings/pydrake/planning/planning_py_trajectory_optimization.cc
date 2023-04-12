@@ -408,8 +408,6 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("order", &Class::Subgraph::order, subgraph_doc.order.doc)
         .def("size", &Class::Subgraph::size, subgraph_doc.order.doc)
         .def("regions", &Class::Subgraph::regions, subgraph_doc.regions.doc)
-        .def("vertices", &Class::Subgraph::vertices, subgraph_doc.vertices.doc)
-        .def("edges", &Class::Subgraph::edges, subgraph_doc.edges.doc)
         .def("AddTimeCost", &Class::Subgraph::AddTimeCost,
             py::arg("weight") = 1.0, subgraph_doc.AddTimeCost.doc)
         .def("AddPathLengthCost",
@@ -438,8 +436,6 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         doc.GCSTrajectoryOptimization.SubgraphEdges;
     py::class_<Class::SubgraphEdges>(
         gcs_traj_opt, "SubgraphEdges", subgraph_edges_doc.doc)
-        .def(
-            "edges", &Class::SubgraphEdges::edges, subgraph_edges_doc.edges.doc)
         .def("AddVelocityBounds", &Class::SubgraphEdges::AddVelocityBounds,
             py::arg("lb"), py::arg("ub"),
             subgraph_edges_doc.AddVelocityBounds.doc);

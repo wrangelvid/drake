@@ -71,12 +71,6 @@ class GCSTrajectoryOptimization {
      * CartesianProduct.*/
     const ConvexSets& regions() const { return regions_; }
 
-    /** Returns all vertices associated with this subgraph.*/
-    const std::vector<Vertex*>& vertices() const { return vertices_; }
-
-    /** Returns all edges within this subgraph.*/
-    const std::vector<Edge*>& edges() const { return edges_; }
-
     /** Adds a minimum time cost to all vertices and edges in the graph
     The cost is the sum of the time scaling variables.
 
@@ -161,6 +155,12 @@ class GCSTrajectoryOptimization {
              double d_min, double d_max, const std::string& name,
              GCSTrajectoryOptimization* gcs);
 
+    /** Returns all vertices associated with this subgraph.*/
+    const std::vector<Vertex*>& vertices() const { return vertices_; }
+
+    /** Returns all edges within this subgraph.*/
+    const std::vector<Edge*>& edges() const { return edges_; }
+
     const ConvexSets regions_;
     int order_;
     const std::string name_;
@@ -193,14 +193,14 @@ class GCSTrajectoryOptimization {
     void AddVelocityBounds(const Eigen::Ref<const Eigen::VectorXd>& lb,
                            const Eigen::Ref<const Eigen::VectorXd>& ub);
 
-    const std::vector<Edge*>& edges() const { return edges_; }
-
    private:
     SubgraphEdges(const Subgraph* from, const Subgraph* to,
                   const ConvexSet* subspace, GCSTrajectoryOptimization* gcs);
 
     bool RegionsConnectThroughSubspace(const ConvexSet& A, const ConvexSet& B,
                                        const ConvexSet& subspace);
+
+    const std::vector<Edge*>& edges() const { return edges_; }
 
     const Subgraph* from_;
     const Subgraph* to_;
