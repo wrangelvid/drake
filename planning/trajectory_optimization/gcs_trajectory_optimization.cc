@@ -1,10 +1,10 @@
 #include "drake/planning/trajectory_optimization/gcs_trajectory_optimization.h"
 
-#include <memory>
-#include <string>
-#include <utility>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "drake/common/pointer_cast.h"
+#include "drake/common/scope_exit.h"
 #include "drake/common/symbolic/decompose.h"
 #include "drake/geometry/optimization/cartesian_product.h"
 #include "drake/geometry/optimization/hpolyhedron.h"
@@ -28,15 +28,11 @@ using geometry::optimization::GraphOfConvexSets;
 using geometry::optimization::GraphOfConvexSetsOptions;
 using geometry::optimization::HPolyhedron;
 using geometry::optimization::Point;
-using math::EigenToStdVector;
 using solvers::Binding;
 using solvers::Constraint;
 using solvers::Cost;
 using solvers::L2NormCost;
-using solvers::LinearConstraint;
-using solvers::LinearCost;
 using solvers::LinearEqualityConstraint;
-using solvers::PerspectiveQuadraticCost;
 using symbolic::DecomposeLinearExpressions;
 using symbolic::Expression;
 using symbolic::MakeMatrixContinuousVariable;
@@ -44,57 +40,56 @@ using symbolic::MakeVectorContinuousVariable;
 using trajectories::BezierCurve;
 using trajectories::CompositeTrajectory;
 using trajectories::Trajectory;
-using Vertex = geometry::optimization::GraphOfConvexSets::Vertex;
-using Edge = geometry::optimization::GraphOfConvexSets::Edge;
-using VertexId = geometry::optimization::GraphOfConvexSets::VertexId;
-using EdgeId = geometry::optimization::GraphOfConvexSets::EdgeId;
+using Vertex = GraphOfConvexSets::Vertex;
+using Edge = GraphOfConvexSets::Edge;
+using VertexId = GraphOfConvexSets::VertexId;
+using EdgeId = GraphOfConvexSets::EdgeId;
 
 Subgraph::Subgraph(
     const ConvexSets& regions,
     const std::vector<std::pair<int, int>>& edges_between_regions, int order,
-    double h_min, double h_max, const std::string& name,
+    double h_min, double h_max, std::string name,
     GCSTrajectoryOptimization* gcs)
-    : regions_(regions), order_(order), name_(name), gcs_(gcs) {
-  if (order_ < 0) {
-    throw std::runtime_error("Order must be non-negative.");
-  }
+    : regions_(regions), order_(order), name_(std::move(name)), gcs_(*gcs) {
+  DRAKE_THROW_UNLESS(order >= 0);
 
   // Make sure all regions have the same ambient dimension.
-  for (const auto& region : regions_) {
-    DRAKE_DEMAND(region->ambient_dimension() == gcs->num_positions());
+  for (const std::unique_ptr<ConvexSet>& region : regions_) {
+    DRAKE_THROW_UNLESS(region != nullptr);
+    DRAKE_THROW_UNLESS(region->ambient_dimension() == num_positions());
   }
   // Make time scaling set once to avoid many allocations when adding the
   // vertices to GCS.
-  HPolyhedron time_scaling_set = HPolyhedron::MakeBox(
-      h_min * Eigen::VectorXd::Ones(1), h_max * Eigen::VectorXd::Ones(1));
+  const HPolyhedron time_scaling_set =
+      HPolyhedron::MakeBox(Vector1d(h_min), Vector1d(h_max));
 
   // Allocating variables and control points to be used in the constraints.
-  // Bindings allow formulating the constraints once, and then pass
-  // them to all the edges.
+  // Bindings allow formulating the constraints once, and then pass them to all
+  // the edges.
   // An edge goes from the vertex u to the vertex v. Where its control points
   // and trajectories are needed for continuity constraints. Saving the
   // variables for u simplifies the cost/constraint formulation for optional
   // costs like the path length cost.
-  auto u_control =
-      MakeMatrixContinuousVariable(gcs_->num_positions(), order_ + 1, "xu");
-  auto v_control =
-      MakeMatrixContinuousVariable(gcs_->num_positions(), order_ + 1, "xv");
-
-  auto u_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
+  const MatrixX<symbolic::Variable> u_control =
+      MakeMatrixContinuousVariable(num_positions(), order_ + 1, "xu");
+  const MatrixX<symbolic::Variable> v_control =
+      MakeMatrixContinuousVariable(num_positions(), order_ + 1, "xv");
+  const Eigen::Map<const VectorX<symbolic::Variable>> u_control_vars(
       u_control.data(), u_control.size());
-  auto v_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
+  const Eigen::Map<const VectorX<symbolic::Variable>> v_control_vars(
       v_control.data(), v_control.size());
 
   u_h_ = MakeVectorContinuousVariable(1, "hu");
-  auto v_h = MakeVectorContinuousVariable(1, "hv");
+  const VectorX<symbolic::Variable> v_h = MakeVectorContinuousVariable(1, "hv");
 
   u_vars_ = solvers::ConcatenateVariableRefList({u_control_vars, u_h_});
-  auto edge_vars = solvers::ConcatenateVariableRefList(
-      {u_control_vars, u_h_, v_control_vars, v_h});
+  const VectorX<symbolic::Variable> edge_vars =
+      solvers::ConcatenateVariableRefList(
+          {u_control_vars, u_h_, v_control_vars, v_h});
 
   u_r_trajectory_ = BezierCurve<Expression>(0, 1, u_control.cast<Expression>());
 
-  auto v_r_trajectory =
+  const auto v_r_trajectory =
       BezierCurve<Expression>(0, 1, v_control.cast<Expression>());
 
   // TODO(wrangelvid) Pull this out into a function once we have a better way to
@@ -102,51 +97,55 @@ Subgraph::Subgraph(
   const VectorX<Expression> path_continuity_error =
       v_r_trajectory.control_points().col(0) -
       u_r_trajectory_.control_points().col(order);
-  Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
+  MatrixXd M(num_positions(), edge_vars.size());
   DecomposeLinearExpressions(path_continuity_error, edge_vars, &M);
   // TODO(wrangelvid) The matrix M might be sparse, so we could drop columns
   // here.
 
-  auto path_continuity_constraint = std::make_shared<LinearEqualityConstraint>(
-      M, VectorXd::Zero(gcs_->num_positions()));
+  const auto path_continuity_constraint =
+      std::make_shared<LinearEqualityConstraint>(
+          M, VectorXd::Zero(num_positions()));
 
   // Add Regions with time scaling set.
   for (size_t i = 0; i < regions_.size(); ++i) {
-    // Assign each control point to a separate set.
     ConvexSets vertex_set;
-    for (int j = 0; j < order + 1; ++j) {
-      vertex_set.emplace_back(*regions_[i]);
-    }
+    // Assign each control point to a separate set.
+    const int num_points = order + 1;
+    vertex_set.reserve(num_points + 1);
+    vertex_set.insert(vertex_set.begin(), num_points,
+                      ConvexSets::value_type{*regions_[i]});
     // Add time scaling set.
     vertex_set.emplace_back(time_scaling_set);
 
-    vertices_.emplace_back(gcs_->gcs_.AddVertex(
-        CartesianProduct(vertex_set), name + ": " + std::to_string(i)));
+    vertices_.emplace_back(gcs_.gcs_.AddVertex(CartesianProduct(vertex_set),
+                                               fmt::format("{}: {}", name, i)));
   }
 
   // Connect vertices with edges.
-  for (const auto& [u_idx, v_idx] : edges_between_regions) {
+  for (const auto& [u_index, v_index] : edges_between_regions) {
     // Add edge.
-    Vertex* u = vertices_[u_idx];
-    Vertex* v = vertices_[v_idx];
-    Edge* uv_edge = gcs_->gcs_.AddEdge(*u, *v, u->name() + " -> " + v->name());
+    const Vertex& u = *vertices_[u_index];
+    const Vertex& v = *vertices_[v_index];
+    Edge* uv_edge = gcs_.AddEdge(u, v);
 
     edges_.emplace_back(uv_edge);
 
     // Add path continuity constraints.
     uv_edge->AddConstraint(
-        Binding<Constraint>(path_continuity_constraint, {u->x(), v->x()}));
+        Binding<Constraint>(path_continuity_constraint, {u.x(), v.x()}));
   }
 
   if (order_ > 0) {
     // These costs rely on the derivative of the trajectory.
-    for (auto weight_matrix : gcs_->global_path_length_costs_) {
+    for (const MatrixXd& weight_matrix : gcs_.global_path_length_costs_) {
       Subgraph::AddPathLengthCost(weight_matrix);
     }
   }
 }
 
-void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
+Subgraph::~Subgraph() = default;
+
+void Subgraph::AddPathLengthCost(const MatrixXd& weight_matrix) {
   /*
     We will upper bound the trajectory length by the sum of the distances
     between the control points. ∑ ||rᵢ − rᵢ₊₁||₂
@@ -157,29 +156,29 @@ void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
     So the previous upper bound is equivalent to: ∑ ||ṙᵢ||₂ / order
     Because ||ṙᵢ||₂ = ||rᵢ₊₁ − rᵢ||₂ * order
   */
-  DRAKE_DEMAND(weight_matrix.rows() == gcs_->num_positions());
-  DRAKE_DEMAND(weight_matrix.cols() == gcs_->num_positions());
+  DRAKE_THROW_UNLESS(weight_matrix.rows() == num_positions());
+  DRAKE_THROW_UNLESS(weight_matrix.cols() == num_positions());
 
   if (order() == 0) {
     throw std::runtime_error(
         "Path length cost is not defined for a set of order 0.");
   }
 
-  auto u_rdot_control =
-      dynamic_pointer_cast_or_throw<BezierCurve<symbolic::Expression>>(
+  const MatrixX<Expression> u_rdot_control =
+      dynamic_pointer_cast_or_throw<BezierCurve<Expression>>(
           u_r_trajectory_.MakeDerivative())
           ->control_points();
 
   for (int i = 0; i < u_rdot_control.cols(); ++i) {
-    Eigen::MatrixXd M(gcs_->num_positions(), u_vars_.size());
+    MatrixXd M(num_positions(), u_vars_.size());
     DecomposeLinearExpressions(u_rdot_control.col(i) / order(), u_vars_, &M);
     // TODO(wrangelvid) The matrix M might be sparse, so we could drop columns
     // here.
 
-    auto path_length_cost = std::make_shared<L2NormCost>(
-        weight_matrix * M, Eigen::VectorXd::Zero(gcs_->num_positions()));
+    const auto path_length_cost = std::make_shared<L2NormCost>(
+        weight_matrix * M, VectorXd::Zero(num_positions()));
 
-    for (const auto& v : vertices_) {
+    for (Vertex* v : vertices_) {
       // The duration variable is the last element of the vertex.
       v->AddCost(Binding<L2NormCost>(path_length_cost, v->x()));
     }
@@ -187,20 +186,19 @@ void Subgraph::AddPathLengthCost(const Eigen::MatrixXd& weight_matrix) {
 }
 
 void Subgraph::AddPathLengthCost(double weight) {
-  auto weight_matrix =
-      weight *
-      Eigen::MatrixXd::Identity(gcs_->num_positions(), gcs_->num_positions());
+  const MatrixXd weight_matrix =
+      weight * MatrixXd::Identity(num_positions(), num_positions());
   return Subgraph::AddPathLengthCost(weight_matrix);
 }
 
-EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph* from,
-                                             const Subgraph* to,
+EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph& from,
+                                             const Subgraph& to,
                                              const ConvexSet* subspace,
                                              GCSTrajectoryOptimization* gcs)
-    : gcs_(gcs) {
+    : gcs_(*gcs) {
   // Formulate edge costs and constraints.
   if (subspace != nullptr) {
-    if (subspace->ambient_dimension() != gcs_->num_positions()) {
+    if (subspace->ambient_dimension() != num_positions()) {
       throw std::runtime_error(
           "Subspace dimension must match the number of positions.");
     }
@@ -218,14 +216,13 @@ EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph* from,
   // variables for u simplifies the cost/constraint formulation for optional
   // constraints like the velocity bounds.
 
-  auto u_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
-                                                from->order() + 1, "xu");
-  auto v_control = MakeMatrixContinuousVariable(gcs_->num_positions(),
-                                                to->order() + 1, "xv");
-
-  auto u_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
+  const MatrixX<symbolic::Variable> u_control =
+      MakeMatrixContinuousVariable(num_positions(), from.order() + 1, "xu");
+  const MatrixX<symbolic::Variable> v_control =
+      MakeMatrixContinuousVariable(num_positions(), to.order() + 1, "xv");
+  Eigen::Map<const VectorX<symbolic::Variable>> u_control_vars(
       u_control.data(), u_control.size());
-  auto v_control_vars = Eigen::Map<VectorX<symbolic::Variable>>(
+  Eigen::Map<const VectorX<symbolic::Variable>> v_control_vars(
       v_control.data(), v_control.size());
 
   u_h_ = MakeVectorContinuousVariable(1, "Tu");
@@ -233,8 +230,9 @@ EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph* from,
 
   u_vars_ = solvers::ConcatenateVariableRefList({u_control_vars, u_h_});
   v_vars_ = solvers::ConcatenateVariableRefList({v_control_vars, v_h_});
-  auto edge_vars = solvers::ConcatenateVariableRefList(
-      {u_control_vars, u_h_, v_control_vars, v_h_});
+  const VectorX<symbolic::Variable> edge_vars =
+      solvers::ConcatenateVariableRefList(
+          {u_control_vars, u_h_, v_control_vars, v_h_});
 
   u_r_trajectory_ = BezierCurve<Expression>(0, 1, u_control.cast<Expression>());
 
@@ -245,46 +243,46 @@ EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph* from,
   // extract M from bezier curves.
   const VectorX<Expression> path_continuity_error =
       v_r_trajectory_.control_points().col(0) -
-      u_r_trajectory_.control_points().col(from->order());
-  Eigen::MatrixXd M(gcs_->num_positions(), edge_vars.size());
+      u_r_trajectory_.control_points().col(from.order());
+  MatrixXd M(num_positions(), edge_vars.size());
   DecomposeLinearExpressions(path_continuity_error, edge_vars, &M);
   // TODO(wrangelvid) The matrix M might be sparse, so we could drop columns
   // here.
 
-  auto path_continuity_constraint = std::make_shared<LinearEqualityConstraint>(
-      M, VectorXd::Zero(gcs_->num_positions()));
+  const auto path_continuity_constraint =
+      std::make_shared<LinearEqualityConstraint>(
+          M, VectorXd::Zero(num_positions()));
 
   // TODO(wrangelvid) this can be parallelized.
-  for (int i = 0; i < from->size(); ++i) {
-    for (int j = 0; j < to->size(); ++j) {
-      if (from->regions()[i]->IntersectsWith(*to->regions()[j])) {
+  for (int i = 0; i < from.size(); ++i) {
+    for (int j = 0; j < to.size(); ++j) {
+      if (from.regions()[i]->IntersectsWith(*to.regions()[j])) {
         if (subspace != nullptr) {
           // Check if the regions are connected through the subspace.
-          if (!RegionsConnectThroughSubspace(*from->regions()[i],
-                                             *to->regions()[j], *subspace)) {
+          if (!RegionsConnectThroughSubspace(*from.regions()[i],
+                                             *to.regions()[j], *subspace)) {
             continue;
           }
         }
-        // Add edge.
-        Vertex* u = from->vertices_[i];
-        Vertex* v = to->vertices_[j];
-        Edge* uv_edge =
-            gcs_->gcs_.AddEdge(*u, *v, u->name() + " -> " + v->name());
 
+        // Add edge.
+        const Vertex& u = *from.vertices_[i];
+        const Vertex& v = *to.vertices_[j];
+        Edge* uv_edge = gcs_.AddEdge(u, v);
         edges_.emplace_back(uv_edge);
 
         // Add path continuity constraints.
         uv_edge->AddConstraint(Binding<LinearEqualityConstraint>(
-            path_continuity_constraint, {u->x(), v->x()}));
+            path_continuity_constraint, {u.x(), v.x()}));
 
         if (subspace != nullptr) {
           // Add subspace constraints to the first control point of the v
           // vertex. Since we are using zeroth order continuity, the last
           // control point
-          auto vars = v->x().segment(0, gcs_->num_positions());
-          solvers::MathematicalProgram prog{};
-          const auto& x =
-              prog.NewContinuousVariables(gcs_->num_positions(), "x");
+          const auto vars = v.x().segment(0, num_positions());
+          solvers::MathematicalProgram prog;
+          const VectorX<symbolic::Variable> x =
+              prog.NewContinuousVariables(num_positions(), "x");
           subspace->AddPointInSetConstraints(&prog, x);
           for (const auto& binding : prog.GetAllConstraints()) {
             const std::shared_ptr<Constraint>& constraint = binding.evaluator();
@@ -296,6 +294,8 @@ EdgesBetweenSubgraphs::EdgesBetweenSubgraphs(const Subgraph* from,
   }
 }
 
+EdgesBetweenSubgraphs::~EdgesBetweenSubgraphs() = default;
+
 bool EdgesBetweenSubgraphs::RegionsConnectThroughSubspace(
     const ConvexSet& A, const ConvexSet& B, const ConvexSet& subspace) {
   DRAKE_THROW_UNLESS(A.ambient_dimension() == B.ambient_dimension() &&
@@ -306,8 +306,9 @@ bool EdgesBetweenSubgraphs::RegionsConnectThroughSubspace(
   } else {
     // Otherwise, we can formulate a problem to check if a point is contained in
     // A, B and the subspace.
-    solvers::MathematicalProgram prog{};
-    const auto& x = prog.NewContinuousVariables(gcs_->num_positions(), "x");
+    solvers::MathematicalProgram prog;
+    const VectorX<symbolic::Variable> x =
+        prog.NewContinuousVariables(num_positions(), "x");
     A.AddPointInSetConstraints(&prog, x);
     B.AddPointInSetConstraints(&prog, x);
     subspace.AddPointInSetConstraints(&prog, x);
@@ -316,27 +317,26 @@ bool EdgesBetweenSubgraphs::RegionsConnectThroughSubspace(
   }
 }
 
-GCSTrajectoryOptimization::GCSTrajectoryOptimization(int num_positions) {
-  if (num_positions < 1) {
-    throw std::runtime_error("Dimension must be greater than 0.");
-  }
-  num_positions_ = num_positions;
+GCSTrajectoryOptimization::GCSTrajectoryOptimization(int num_positions)
+    : num_positions_(num_positions) {
+  DRAKE_THROW_UNLESS(num_positions >= 1);
 }
 
+GCSTrajectoryOptimization::~GCSTrajectoryOptimization() = default;
+
 Subgraph& GCSTrajectoryOptimization::AddRegions(
-    const geometry::optimization::ConvexSets& regions,
+    const ConvexSets& regions,
     const std::vector<std::pair<int, int>>& edges_between_regions, int order,
     double h_min, double h_max, std::string name) {
-  return *subgraphs_
-              .emplace_back(std::unique_ptr<Subgraph>(
-                  new Subgraph(regions, edges_between_regions, order, h_min,
-                               h_max, name, this)))
-              .get();
+  return *subgraphs_.emplace_back(new Subgraph(regions, edges_between_regions,
+                                               order, h_min, h_max,
+                                               std::move(name), this));
 }
 
-Subgraph& GCSTrajectoryOptimization::AddRegions(
-    const geometry::optimization::ConvexSets& regions, int order, double h_min,
-    double h_max, std::string name) {
+Subgraph& GCSTrajectoryOptimization::AddRegions(const ConvexSets& regions,
+                                                int order, double h_min,
+                                                double h_max,
+                                                std::string name) {
   if (name.empty()) {
     name = fmt::format("S{}", subgraphs_.size());
   }
@@ -352,23 +352,20 @@ Subgraph& GCSTrajectoryOptimization::AddRegions(
     }
   }
 
-  return GCSTrajectoryOptimization::AddRegions(regions, edges_between_regions,
-                                               order, h_min, h_max, name);
+  return GCSTrajectoryOptimization::AddRegions(
+      regions, edges_between_regions, order, h_min, h_max, std::move(name));
 }
 
 EdgesBetweenSubgraphs& GCSTrajectoryOptimization::AddEdges(
-    const Subgraph* from, const Subgraph* to,
-    const geometry::optimization::ConvexSet* subspace) {
-  return *subgraph_edges_
-              .emplace_back(std::unique_ptr<EdgesBetweenSubgraphs>(
-                  new EdgesBetweenSubgraphs(from, to, subspace, this)))
-              .get();
+    const Subgraph& from, const Subgraph& to, const ConvexSet* subspace) {
+  return *subgraph_edges_.emplace_back(
+      new EdgesBetweenSubgraphs(from, to, subspace, this));
 }
 
 void GCSTrajectoryOptimization::AddPathLengthCost(
-    const Eigen::MatrixXd& weight_matrix) {
+    const MatrixXd& weight_matrix) {
   // Add path length cost to each subgraph.
-  for (auto& subgraph : subgraphs_) {
+  for (std::unique_ptr<Subgraph>& subgraph : subgraphs_) {
     if (subgraph->order() > 0) {
       subgraph->AddPathLengthCost(weight_matrix);
     }
@@ -377,8 +374,8 @@ void GCSTrajectoryOptimization::AddPathLengthCost(
 }
 
 void GCSTrajectoryOptimization::AddPathLengthCost(double weight) {
-  auto weight_matrix =
-      weight * Eigen::MatrixXd::Identity(num_positions(), num_positions());
+  const MatrixXd weight_matrix =
+      weight * MatrixXd::Identity(num_positions(), num_positions());
   return GCSTrajectoryOptimization::AddPathLengthCost(weight_matrix);
 }
 
@@ -386,7 +383,8 @@ std::pair<CompositeTrajectory<double>, solvers::MathematicalProgramResult>
 GCSTrajectoryOptimization::SolvePath(const Subgraph& source,
                                      const Subgraph& target,
                                      const GraphOfConvexSetsOptions& options) {
-  Eigen::VectorXd empty_vector;
+  const VectorXd empty_vector;
+
   VertexId source_id = source.vertices_[0]->id();
   Vertex* dummy_source = nullptr;
 
@@ -397,60 +395,60 @@ GCSTrajectoryOptimization::SolvePath(const Subgraph& source,
     // Source subgraph has more than one region. Add a dummy source vertex.
     dummy_source = gcs_.AddVertex(Point(empty_vector), "Dummy Source");
     source_id = dummy_source->id();
-    for (const auto& v : source.vertices_) {
-      gcs_.AddEdge(*dummy_source, *v,
-                   dummy_source->name() + " -> " + v->name());
+    for (const Vertex* v : source.vertices_) {
+      AddEdge(*dummy_source, *v);
     }
   }
+  const ScopeExit cleanup_dummy_source_before_returning([&]() {
+    if (dummy_source != nullptr) {
+      gcs_.RemoveVertex(dummy_source->id());
+    }
+  });
+
   if (target.size() != 1) {
     // Target subgraph has more than one region. Add a dummy target vertex.
     dummy_target = gcs_.AddVertex(Point(empty_vector), "Dummy target");
     target_id = dummy_target->id();
-    for (const auto& v : target.vertices_) {
-      gcs_.AddEdge(*v, *dummy_target,
-                   v->name() + " -> " + dummy_target->name());
+    for (const Vertex* v : target.vertices_) {
+      AddEdge(*v, *dummy_target);
     }
   }
-
-  solvers::MathematicalProgramResult result =
-      gcs_.SolveShortestPath(source_id, target_id, options);
-
-  if (!result.is_success()) {
-    if (dummy_source != nullptr) {
-      gcs_.RemoveVertex(dummy_source->id());
-    }
-
+  const ScopeExit cleanup_dummy_target_before_returning([&]() {
     if (dummy_target != nullptr) {
       gcs_.RemoveVertex(dummy_target->id());
     }
+  });
+
+  solvers::MathematicalProgramResult result =
+      gcs_.SolveShortestPath(source_id, target_id, options);
+  if (!result.is_success()) {
     return {CompositeTrajectory<double>({}), result};
   }
 
   // Extract the flow from the solution.
-  std::map<VertexId, std::vector<Edge*>> outgoing_edges;
-  std::map<EdgeId, double> flows;
-  for (auto& edge : gcs_.Edges()) {
+  std::unordered_map<VertexId, std::vector<Edge*>> outgoing_edges;
+  std::unordered_map<EdgeId, double> flows;
+  for (Edge* edge : gcs_.Edges()) {
     outgoing_edges[edge->u().id()].push_back(edge);
     flows[edge->id()] = result.GetSolution(edge->phi());
   }
 
   // Extract the path by traversing the graph with a depth first search.
-  std::vector<VertexId> visited_vertex_ids{source_id};
+  std::unordered_set<VertexId> visited_vertex_ids{source_id};
   std::vector<VertexId> path_vertex_ids{source_id};
-  std::vector<Edge*> path_edges{};
+  std::vector<Edge*> path_edges;
   while (path_vertex_ids.back() != target_id) {
     // Find the edge with the maximum flow from the current node.
     double maximum_flow = 0;
     VertexId max_flow_vertex_id;
     Edge* max_flow_edge = nullptr;
     for (Edge* e : outgoing_edges[path_vertex_ids.back()]) {
-      double next_flow = flows[e->id()];
-      VertexId next_vertex_id = e->v().id();
+      const double next_flow = flows[e->id()];
+      const VertexId next_vertex_id = e->v().id();
 
       // If the edge has not been visited and has a flow greater than the
       // current maximum, update the maximum flow and the vertex id.
-      if (std::find(visited_vertex_ids.begin(), visited_vertex_ids.end(),
-                    e->v().id()) == visited_vertex_ids.end() &&
+      if (visited_vertex_ids.count(e->v().id()) == 0 &&
           next_flow > maximum_flow && next_flow > options.flow_tolerance) {
         maximum_flow = next_flow;
         max_flow_vertex_id = next_vertex_id;
@@ -462,11 +460,12 @@ GCSTrajectoryOptimization::SolvePath(const Subgraph& source,
       // If no candidate edges are found, backtrack to the previous node and
       // continue the search.
       path_vertex_ids.pop_back();
+      DRAKE_DEMAND(!path_vertex_ids.empty());
       continue;
     } else {
       // If the maximum flow is non-zero, add the vertex to the path and
       // continue the search.
-      visited_vertex_ids.push_back(max_flow_vertex_id);
+      visited_vertex_ids.insert(max_flow_vertex_id);
       path_vertex_ids.push_back(max_flow_vertex_id);
       path_edges.push_back(max_flow_edge);
     }
@@ -474,53 +473,56 @@ GCSTrajectoryOptimization::SolvePath(const Subgraph& source,
 
   // Remove the dummy edges from the path.
   if (dummy_source != nullptr) {
+    DRAKE_DEMAND(!path_edges.empty());
     path_edges.erase(path_edges.begin());
-    gcs_.RemoveVertex(dummy_source->id());
   }
-
   if (dummy_target != nullptr) {
+    DRAKE_DEMAND(!path_edges.empty());
     path_edges.erase(path_edges.end() - 1);
-    gcs_.RemoveVertex(dummy_target->id());
   }
 
   // Extract the path from the edges.
-  std::vector<copyable_unique_ptr<Trajectory<double>>> bezier_curves{};
-  for (auto& edge : path_edges) {
+  std::vector<copyable_unique_ptr<Trajectory<double>>> bezier_curves;
+  for (Edge* edge : path_edges) {
     // Extract phi from the solution to rescale the control points and duration
     // in case we get the relaxed solution.
-    double phi_inv = 1 / result.GetSolution(edge->phi());
+    const double phi_inv = 1 / result.GetSolution(edge->phi());
     // Extract the control points from the solution.
-    int num_control_points = (edge->xu().size() - 1) / num_positions();
-    MatrixX<double> edge_path_points =
+    const int num_control_points = (edge->xu().size() - 1) / num_positions();
+    const MatrixX<double> edge_path_points =
         phi_inv *
         Eigen::Map<MatrixX<double>>(result.GetSolution(edge->xu()).data(),
                                     num_positions(), num_control_points);
 
     // Extract the duration from the solution.
-    double h = phi_inv * result.GetSolution(edge->xu()).tail<1>().value();
-    double start_time =
+    const double h = phi_inv * result.GetSolution(edge->xu()).tail<1>().value();
+    const double start_time =
         bezier_curves.empty() ? 0 : bezier_curves.back()->end_time();
     bezier_curves.emplace_back(std::make_unique<BezierCurve<double>>(
         start_time, start_time + h, edge_path_points));
   }
 
   // Get the final control points from the solution.
-  double phi_inv = 1 / result.GetSolution(path_edges.back()->phi());
-  int num_control_points =
+  const double phi_inv = 1 / result.GetSolution(path_edges.back()->phi());
+  const int num_control_points =
       (path_edges.back()->xv().size() - 1) / num_positions();
-  MatrixX<double> edge_path_points =
+  const MatrixX<double> edge_path_points =
       phi_inv * Eigen::Map<MatrixX<double>>(
                     result.GetSolution(path_edges.back()->xv()).data(),
                     num_positions(), num_control_points);
 
-  double h =
+  const double h =
       phi_inv * result.GetSolution(path_edges.back()->xv()).tail<1>().value();
-  double start_time =
+  const double start_time =
       bezier_curves.empty() ? 0 : bezier_curves.back()->end_time();
   bezier_curves.emplace_back(std::make_unique<BezierCurve<double>>(
       start_time, start_time + h, edge_path_points));
 
   return {CompositeTrajectory<double>(bezier_curves), result};
+}
+
+Edge* GCSTrajectoryOptimization::AddEdge(const Vertex& u, const Vertex& v) {
+  return gcs_.AddEdge(u, v, fmt::format("{} -> {}", u.name(), v.name()));
 }
 
 }  // namespace trajectory_optimization

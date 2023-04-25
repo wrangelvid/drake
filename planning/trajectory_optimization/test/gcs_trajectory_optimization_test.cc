@@ -46,8 +46,8 @@ GTEST_TEST(GCSTrajectoryOptimizationTest, Basic) {
   auto& source = gcs.AddRegions(MakeConvexSets(Point(start)), 0);
   auto& target = gcs.AddRegions(MakeConvexSets(Point(goal)), 0);
 
-  gcs.AddEdges(&source, &regions);
-  gcs.AddEdges(&regions, &target);
+  gcs.AddEdges(source, regions);
+  gcs.AddEdges(regions, target);
 
   auto [traj, result] = gcs.SolvePath(source, target);
   EXPECT_TRUE(result.is_success());
@@ -60,9 +60,9 @@ GTEST_TEST(GCSTrajectoryOptimizationTest, Basic) {
 GTEST_TEST(GCSTrajectoryOptimizationTest, InvalidPositions) {
   /** Positions passed into GCSTrajectoryOptimization must be greater than 0.*/
   DRAKE_EXPECT_THROWS_MESSAGE(GCSTrajectoryOptimization(0),
-                              "Dimension must be greater than 0.");
+                              ".*num_positions.*");
   DRAKE_EXPECT_THROWS_MESSAGE(GCSTrajectoryOptimization(-1),
-                              "Dimension must be greater than 0.");
+                              ".*num_positions.*");
   DRAKE_EXPECT_NO_THROW(GCSTrajectoryOptimization(1));
 }
 
@@ -73,7 +73,7 @@ GTEST_TEST(GCSTrajectoryOptimizationTest, InvalidOrder) {
   EXPECT_EQ(gcs.num_positions(), kDimension);
   DRAKE_EXPECT_THROWS_MESSAGE(
       gcs.AddRegions(MakeConvexSets(HPolyhedron::MakeUnitBox(kDimension)), -1),
-      "Order must be non-negative.");
+      ".*order.*");
 
   DRAKE_EXPECT_NO_THROW(
       gcs.AddRegions(MakeConvexSets(HPolyhedron::MakeUnitBox(kDimension)), 0));
@@ -138,7 +138,7 @@ GTEST_TEST(GCSTrajectoryOptimizationTest, InvalidSubspace) {
 
   auto subspace_wrong_dimension = HPolyhedron::MakeUnitBox(kDimension + 1);
   DRAKE_EXPECT_THROWS_MESSAGE(
-      gcs.AddEdges(&regions1, &regions2, &subspace_wrong_dimension),
+      gcs.AddEdges(regions1, regions2, &subspace_wrong_dimension),
       "Subspace dimension must match the number of positions.");
 
   Eigen::Matrix<double, 2, 4> vertices;
@@ -146,7 +146,7 @@ GTEST_TEST(GCSTrajectoryOptimizationTest, InvalidSubspace) {
   VPolytope vertices_subspace{vertices};
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      gcs.AddEdges(&regions1, &regions2, &vertices_subspace),
+      gcs.AddEdges(regions1, regions2, &vertices_subspace),
       "Subspace must be a Point or HPolyhedron.");
 }
 
@@ -290,8 +290,8 @@ TEST_F(SimpleEnv2D, BasicShortestPath) {
   auto& source = gcs.AddRegions(MakeConvexSets(Point(start)), 0);
   auto& target = gcs.AddRegions(MakeConvexSets(Point(goal)), 0);
 
-  gcs.AddEdges(&source, &regions);
-  gcs.AddEdges(&regions, &target);
+  gcs.AddEdges(source, regions);
+  gcs.AddEdges(regions, target);
 
   gcs.AddPathLengthCost();
 
@@ -333,8 +333,8 @@ TEST_F(SimpleEnv2D, DurationDelay) {
   auto& target =
       gcs.AddRegions(MakeConvexSets(Point(goal)), 0, kGoalDelay, kGoalDelay);
 
-  gcs.AddEdges(&source, &regions);
-  gcs.AddEdges(&regions, &target);
+  gcs.AddEdges(source, regions);
+  gcs.AddEdges(regions, target);
 
   if (!GurobiOrMosekSolverAvailable()) {
     return;
@@ -413,8 +413,8 @@ TEST_F(SimpleEnv2D, MultiStartGoal) {
   // Similarly for the goal, but with a delay of kGoalDelay seconds.
   auto& target = gcs.AddRegions(MakeConvexSets(Point(goal1), Point(goal2)), 0);
 
-  gcs.AddEdges(&source, &regions);
-  gcs.AddEdges(&regions, &target);
+  gcs.AddEdges(source, regions);
+  gcs.AddEdges(regions, target);
 
   gcs.AddPathLengthCost();
 
@@ -496,12 +496,12 @@ TEST_F(SimpleEnv2D, IntermediatePoint) {
 
   // The following wiring will give GCS the choice to either go
   // through subspace point or the subspace region.
-  gcs.AddEdges(&source, &main1);
+  gcs.AddEdges(source, main1);
   // Connect the two subgraphs through the intermediate point.
-  gcs.AddEdges(&main1, &main2, &subspace_point);
+  gcs.AddEdges(main1, main2, &subspace_point);
   // Connect the two subgraphs through the subspace region.
-  gcs.AddEdges(&main1, &main2, &subspace_region);
-  gcs.AddEdges(&main2, &target);
+  gcs.AddEdges(main1, main2, &subspace_region);
+  gcs.AddEdges(main2, target);
 
   // We can add different costs to the individual subgraphs.
   main1.AddPathLengthCost(5);

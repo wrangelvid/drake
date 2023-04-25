@@ -1,9 +1,7 @@
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -42,35 +40,33 @@ collision-free trajectory for the robot to a grasping posture, Subgraph B: find
 a collision-free trajectory for the robot with the object in its hand to a
 placing posture, etc.
 */
-class GCSTrajectoryOptimization {
+class GCSTrajectoryOptimization final {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(GCSTrajectoryOptimization);
 
-  ~GCSTrajectoryOptimization() = default;
-
-  /**
-  Constructs the motion planning problem.
-  @param num_positions is the dimension of the configuration space.
-  */
+  /** Constructs the motion planning problem.
+  @param num_positions is the dimension of the configuration space. */
   explicit GCSTrajectoryOptimization(int num_positions);
+
+  ~GCSTrajectoryOptimization();
 
   class Subgraph final {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Subgraph);
 
-    ~Subgraph() = default;
+    ~Subgraph();
 
-    /** Returns the name of the subgraph.*/
+    /** Returns the name of the subgraph. */
     const std::string& name() const { return name_; }
 
-    /** Returns the order of the Bézier trajectory within the region.*/
+    /** Returns the order of the Bézier trajectory within the region. */
     int order() const { return order_; }
 
-    /** Returns the number of vertices in the subgraph.*/
+    /** Returns the number of vertices in the subgraph. */
     int size() const { return vertices_.size(); }
 
     /** Returns the regions associated with this subgraph before the
-     * CartesianProduct.*/
+    CartesianProduct. */
     const geometry::optimization::ConvexSets& regions() const {
       return regions_;
     }
@@ -98,16 +94,19 @@ class GCSTrajectoryOptimization {
     void AddPathLengthCost(double weight = 1.0);
 
    private:
-    /* Constructs a new subgraph and copies the regions.*/
+    /* Constructs a new subgraph and copies the regions. */
     Subgraph(const geometry::optimization::ConvexSets& regions,
              const std::vector<std::pair<int, int>>& regions_to_connect,
-             int order, double h_min, double h_max, const std::string& name,
+             int order, double h_min, double h_max, std::string name,
              GCSTrajectoryOptimization* gcs);
 
+    /* Convenience accessor, for brevity. */
+    int num_positions() const { return gcs_.num_positions(); }
+
     const geometry::optimization::ConvexSets regions_;
-    int order_;
+    const int order_;
     const std::string name_;
-    GCSTrajectoryOptimization* gcs_;
+    GCSTrajectoryOptimization& gcs_;
 
     std::vector<geometry::optimization::GraphOfConvexSets::Vertex*> vertices_;
     std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
@@ -127,19 +126,22 @@ class GCSTrajectoryOptimization {
    public:
     DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(EdgesBetweenSubgraphs);
 
-    ~EdgesBetweenSubgraphs() = default;
+    ~EdgesBetweenSubgraphs();
 
    private:
-    EdgesBetweenSubgraphs(const Subgraph* from, const Subgraph* to,
+    EdgesBetweenSubgraphs(const Subgraph& from, const Subgraph& to,
                           const geometry::optimization::ConvexSet* subspace,
                           GCSTrajectoryOptimization* gcs);
+
+    /* Convenience accessor, for brevity. */
+    int num_positions() const { return gcs_.num_positions(); }
 
     bool RegionsConnectThroughSubspace(
         const geometry::optimization::ConvexSet& A,
         const geometry::optimization::ConvexSet& B,
         const geometry::optimization::ConvexSet& subspace);
 
-    GCSTrajectoryOptimization* gcs_;
+    GCSTrajectoryOptimization& gcs_;
 
     std::vector<geometry::optimization::GraphOfConvexSets::Edge*> edges_;
 
@@ -228,7 +230,7 @@ class GCSTrajectoryOptimization {
   because GraphOfConvexSet::Vertex , supports arbitrary instances of ConvexSets.
   */
   EdgesBetweenSubgraphs& AddEdges(
-      const Subgraph* from, const Subgraph* to,
+      const Subgraph& from, const Subgraph& to,
       const geometry::optimization::ConvexSet* subspace = nullptr);
 
   /** Adds multiple L2Norm Costs on the upper bound of the path length.
@@ -265,21 +267,24 @@ class GCSTrajectoryOptimization {
 
   std::pair<trajectories::CompositeTrajectory<double>,
             solvers::MathematicalProgramResult>
-  SolvePath(const Subgraph& source, const Subgraph& target,
-            const geometry::optimization::GraphOfConvexSetsOptions& options =
-                geometry::optimization::GraphOfConvexSetsOptions());
+  SolvePath(
+      const Subgraph& source, const Subgraph& target,
+      const geometry::optimization::GraphOfConvexSetsOptions& options = {});
 
  private:
-  // store the subgraphs by reference
-  std::vector<std::unique_ptr<Subgraph>> subgraphs_{};
-  std::vector<std::unique_ptr<EdgesBetweenSubgraphs>> subgraph_edges_{};
+  const int num_positions_;
 
-  std::vector<Eigen::MatrixXd> global_path_length_costs_{};
+  // Adds a Edge to gcs_ with the name "{u.name} -> {v.name}".
+  geometry::optimization::GraphOfConvexSets::Edge* AddEdge(
+      const geometry::optimization::GraphOfConvexSets::Vertex& u,
+      const geometry::optimization::GraphOfConvexSets::Vertex& v);
 
-  int num_positions_;
+  geometry::optimization::GraphOfConvexSets gcs_;
 
-  geometry::optimization::GraphOfConvexSets gcs_{
-      geometry::optimization::GraphOfConvexSets()};
+  // Store the subgraphs by reference.
+  std::vector<std::unique_ptr<Subgraph>> subgraphs_;
+  std::vector<std::unique_ptr<EdgesBetweenSubgraphs>> subgraph_edges_;
+  std::vector<Eigen::MatrixXd> global_path_length_costs_;
 };
 
 }  // namespace trajectory_optimization
