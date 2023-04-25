@@ -958,40 +958,104 @@ MathematicalProgramResult GraphOfConvexSets::SolveShortestPath(
       }
       paths.push_back(new_path);
 
-      // Optimize path
-      std::vector<Binding<Constraint>> added_constraints;
-      for (const auto& [edge_id, e] : edges_) {
-        if (e->phi_value_.has_value() || unusable_edges.count(edge_id)) {
-          continue;
+      // Optimize path.
+      // Since the path is known, we can directly solve the rounded problem
+      // without the perspectives or the flow constraints.
+      MathematicalProgram rounded_prog;
+
+      for (const Edge* e : new_path) {
+        rounded_prog.AddDecisionVariables(e->y_);
+        rounded_prog.AddDecisionVariables(e->z_);
+
+        // Point in set constraint: y ∈ X, z ∈ X.
+        e->u().set().AddPointInSetConstraints(&rounded_prog, e->y_);
+        e->v().set().AddPointInSetConstraints(&rounded_prog, e->z_);
+
+        // Edge costs.
+        for (const Binding<Cost>& b : e->costs_) {
+          const VectorXDecisionVariable& old_vars = b.variables();
+          VectorXDecisionVariable vars(old_vars.size());
+          // vars = [yz_vars]
+          for (int j = 0; j < old_vars.size(); ++j) {
+            vars[j] = e->x_to_yz_.at(old_vars[j]);
+          }
+          rounded_prog.AddCost(b.evaluator(), vars);
         }
-        if (std::find(new_path.begin(), new_path.end(), e.get()) !=
-            new_path.end()) {
-          added_constraints.push_back(
-              prog.AddBoundingBoxConstraint(1, 1, relaxed_phi.at(edge_id)));
-        } else {
-          added_constraints.push_back(
-              prog.AddBoundingBoxConstraint(0, 0, relaxed_phi.at(edge_id)));
-          added_constraints.push_back(prog.AddLinearEqualityConstraint(
-              e->y_.cast<Expression>(), VectorXd::Zero(e->y_.size())));
-          added_constraints.push_back(prog.AddLinearEqualityConstraint(
-              e->z_.cast<Expression>(), VectorXd::Zero(e->z_.size())));
-          added_constraints.push_back(prog.AddLinearEqualityConstraint(
-              e->ell_.cast<Expression>(), VectorXd::Zero(e->ell_.size())));
+
+        // Edge constraints.
+        for (const Binding<Constraint>& b : e->constraints_) {
+          const VectorXDecisionVariable& old_vars = b.variables();
+          VectorXDecisionVariable vars(old_vars.size());
+          // vars = [yz_vars]
+          for (int j = 0; j < old_vars.size(); ++j) {
+            vars[j] = e->x_to_yz_.at(old_vars[j]);
+          }
+          rounded_prog.AddConstraint(b.evaluator(), vars);
+        }
+
+        // Vertex costs.
+        for (const Binding<Cost>& b : e->u().costs_) {
+          const VectorXDecisionVariable& old_vars = b.variables();
+          VectorXDecisionVariable vars(old_vars.size());
+          // vars = [yz_vars]
+          for (int i = 0; i < old_vars.size(); ++i) {
+            vars[i] = e->x_to_yz_.at(old_vars[i]);
+          }
+          rounded_prog.AddCost(b.evaluator(), vars);
+        }
+        // Vertex constraints.
+        for (const Binding<Constraint>& b : e->u().constraints_) {
+          const VectorXDecisionVariable& old_vars = b.variables();
+          VectorXDecisionVariable vars(old_vars.size());
+          // vars = [yz_vars]
+          for (int i = 0; i < old_vars.size(); ++i) {
+            vars[i] = e->x_to_yz_.at(old_vars[i]);
+          }
+          rounded_prog.AddConstraint(b.evaluator(), vars);
         }
       }
+      // Add the cost and constraints for the last vertex.
+      for (const Binding<Cost>& b : new_path.back()->v().costs_) {
+        const VectorXDecisionVariable& old_vars = b.variables();
+        VectorXDecisionVariable vars(old_vars.size());
+        // vars = [yz_vars]
+        for (int i = 0; i < old_vars.size(); ++i) {
+          vars[i] = new_path.back()->x_to_yz_.at(old_vars[i]);
+        }
+        rounded_prog.AddCost(b.evaluator(), vars);
+      }
+      for (const Binding<Constraint>& b : new_path.back()->v().constraints_) {
+        const VectorXDecisionVariable& old_vars = b.variables();
+        VectorXDecisionVariable vars(old_vars.size());
+        // vars = [yz_vars]
+        for (int i = 0; i < old_vars.size(); ++i) {
+          vars[i] = new_path.back()->x_to_yz_.at(old_vars[i]);
+        }
+        rounded_prog.AddConstraint(b.evaluator(), vars);
+      }
 
-      MathematicalProgramResult rounded_result = Solve(prog, options, true);
-
+      MathematicalProgramResult rounded_result = Solve(rounded_prog, options, true);
       // Check path quality.
       if (rounded_result.is_success() &&
           (!best_rounded_result.is_success() ||
            rounded_result.get_optimal_cost() <
                best_rounded_result.get_optimal_cost())) {
         best_rounded_result = rounded_result;
-      }
 
-      for (Binding<Constraint>& con : added_constraints) {
-        prog.RemoveConstraint(con);
+        std::unordered_map<symbolic::Variable::Id, int> rounded_decision_variable_index =
+            rounded_prog.decision_variable_index();
+        int count = best_rounded_result.get_x_val().size();
+        Eigen::VectorXd x_val(count + new_path.size());
+        x_val.head(count) = best_rounded_result.get_x_val();
+      
+        //TODO(wrangelvid), somehow have to do this for ALL edges and vertices in the path.
+        for (const Edge* e : new_path) {
+          // Add phi back to the rounded solution.
+          rounded_decision_variable_index.emplace(e->phi_.get_id(), count);
+          x_val[count++] = 1;
+        }
+        best_rounded_result.set_decision_variable_index(rounded_decision_variable_index);
+        best_rounded_result.set_x_val(x_val);
       }
     }
     if (best_rounded_result.is_success()) {
