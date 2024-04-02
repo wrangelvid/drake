@@ -62,6 +62,7 @@ using solvers::L2NormCost;
 using solvers::LinearConstraint;
 using solvers::LinearCost;
 using solvers::LinearEqualityConstraint;
+using solvers::PerspectiveQuadraticCost;
 using symbolic::DecomposeLinearExpressions;
 using symbolic::Expression;
 using symbolic::MakeMatrixContinuousVariable;
@@ -382,6 +383,62 @@ void Subgraph::AddPathLengthCost(double weight) {
   const MatrixXd weight_matrix =
       weight * MatrixXd::Identity(num_positions(), num_positions());
   return Subgraph::AddPathLengthCost(weight_matrix);
+}
+
+void Subgraph::AddNormalizedPathDerivativeCost(
+    int derivative_order, const Eigen::MatrixXd& weight_matrix) {
+  /*
+    As a surrogate for the trajectories dervitative cost, we will add a cost
+    to the derviative of the path normalized by the duration. The path
+    derivative will be upper bounded by the sum of discrete differences like so:
+    h⁻¹ ∑ weight_matrix * |(dᴺ⁻¹r(s)/dsᴺ⁻¹ᵢ₊₁ − dᴺ⁻¹(s)r/dsᴺ⁻¹ᵢ)|₂²
+
+    Using the path integral rule of the bezier curve, we can rewrite this as:
+    (h * (order + 1 - N))⁻¹ ∑ weight_matrix * |dᴺr(s)/dsᴺᵢ|₂²
+  */
+  DRAKE_THROW_UNLESS(weight_matrix.rows() == num_positions());
+  DRAKE_THROW_UNLESS(weight_matrix.cols() == num_positions());
+
+  if (order() < derivative_order) {
+    throw std::runtime_error(
+        "Derivative order must be less than or equal to the set order");
+  }
+
+  if (derivative_order <= 1) {
+    throw std::runtime_error("Derivative order must be greater than 1.");
+  }
+
+  auto sqrt_weight_matrix = weight_matrix.cwiseSqrt();
+  SparseMatrix<double> M_transpose =
+      r_trajectory_.AsLinearInControlPoints(derivative_order).transpose();
+
+  // We will add the cost in form of a perspective quadratic cost:
+  Eigen::MatrixXd A = Eigen::MatrixXd::Zero(
+      order_ - derivative_order,  // Number of control points for one row of
+                                  // dᴺr(s)/ds + one for the time scaling.
+      order_ + 2);  // Number of control points for one row of r(s) + 1.
+  A(0, order_ + 1) = order_ - derivative_order + 1;  // z0.
+  A.block(1, 0, M_transpose.rows(), M_transpose.cols()) =
+      sqrt_weight_matrix * M_transpose;
+
+  const auto derivative_cost = std::make_shared<PerspectiveQuadraticCost>(
+      A, Eigen::VectorXd::Zero(order_ - derivative_order));
+
+  solvers::VectorXDecisionVariable vars(order_ + 2);
+  for (int i = 0; i < num_positions(); ++i) {
+    for (Vertex* v : vertices_) {
+      vars << GetControlPoints(*v).row(i).transpose(), GetTimeScaling(*v);
+      v->AddCost(Binding<PerspectiveQuadraticCost>(derivative_cost, vars));
+    }
+  }
+}
+
+void Subgraph::AddNormalizedPathDerivativeCost(int derivative_order,
+                                               double weight) {
+  const MatrixXd weight_matrix =
+      weight * MatrixXd::Identity(num_positions(), num_positions());
+  return Subgraph::AddNormalizedPathDerivativeCost(derivative_order,
+                                                   weight_matrix);
 }
 
 void Subgraph::AddVelocityBounds(const Eigen::Ref<const VectorXd>& lb,
@@ -1368,6 +1425,14 @@ Subgraph& GcsTrajectoryOptimization::AddRegions(
     }
   }
 
+  for (auto& [derivative_order, weight_matrix] :
+       global_normalized_path_derivative_costs_) {
+    if (order >= derivative_order) {
+      subgraph->AddNormalizedPathDerivativeCost(derivative_order,
+                                                weight_matrix);
+    }
+  }
+
   for (auto& [lb, ub, derivative_order] : global_nonlinear_derivative_bounds_) {
     if (order >= derivative_order) {
       subgraph->AddNonlinearDerivativeBounds(lb, ub, derivative_order);
@@ -1506,6 +1571,30 @@ void GcsTrajectoryOptimization::AddPathLengthCost(double weight) {
   const MatrixXd weight_matrix =
       weight * MatrixXd::Identity(num_positions(), num_positions());
   return GcsTrajectoryOptimization::AddPathLengthCost(weight_matrix);
+}
+
+void GcsTrajectoryOptimization::AddNormalizedPathDerivativeCost(
+    int derivative_order, const MatrixXd& weight_matrix) {
+  if (derivative_order <= 1) {
+    throw std::runtime_error("Derivative order must be greater than 1.");
+  }
+  // Add normalized path derivative cost to each subgraph.
+  for (std::unique_ptr<Subgraph>& subgraph : subgraphs_) {
+    if (subgraph->order() >= derivative_order) {
+      subgraph->AddNormalizedPathDerivativeCost(derivative_order,
+                                                weight_matrix);
+    }
+  }
+  global_normalized_path_derivative_costs_.push_back(
+      {derivative_order, weight_matrix});
+}
+
+void GcsTrajectoryOptimization::AddNormalizedPathDerivativeCost(
+    int derivative_order, double weight) {
+  const MatrixXd weight_matrix =
+      weight * MatrixXd::Identity(num_positions(), num_positions());
+  return GcsTrajectoryOptimization::AddNormalizedPathDerivativeCost(
+      derivative_order, weight_matrix);
 }
 
 void GcsTrajectoryOptimization::AddVelocityBounds(

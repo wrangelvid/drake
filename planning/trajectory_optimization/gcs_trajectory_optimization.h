@@ -164,6 +164,46 @@ class GcsTrajectoryOptimization final {
     */
     void AddPathLengthCost(double weight = 1.0);
 
+    /** Adds a convex cost to minimize the normalized path derivative.
+    As a surrogate for the trajectories dervitative dᴺq(t)/dtᴺ, we will add a
+    cost to the derviative of the path normalized by the duration. The path
+    derivative will be upper bounded by the sum of discrete differences on the
+    control points like so:
+    h⁻¹ ∑ weight_matrix * |(dᴺ⁻¹r(s)/dsᴺ⁻¹ᵢ₊₁ − dᴺ⁻¹(s)r/dsᴺ⁻¹ᵢ)|₂²
+    This form appears as a perspective quadratic constraint, which is convex.
+
+    @param derivative_order is the order of the derivative to be minimized.
+    @param weight_matrix is the relative weight of each component for the cost.
+    The diagonal of the matrix is the weight for each dimension. The
+    off-diagonal elements are the weight for the cross terms, which can be used
+    to penalize diagonal movement.
+    @pre weight_matrix must be of size num_positions() x num_positions().
+
+    @throws std::exception if the derivative order <= 1.
+    @throws std::exception if the derivative order is greater than the order of
+    the subgraph.
+    */
+    void AddNormalizedPathDerivativeCost(int derivative_order,
+                                         const Eigen::MatrixXd& weight_matrix);
+
+    /** Adds a convex cost to minimize the normalized path derivative.
+    As a surrogate for the trajectories dervitative dᴺq(t)/dtᴺ, we will add a
+    cost to the derviative of the path normalized by the duration. The path
+    derivative will be upper bounded by the sum of discrete differences on the
+    control points like so:
+    h⁻¹ ∑ weight_matrix * |(dᴺ⁻¹r(s)/dsᴺ⁻¹ᵢ₊₁ − dᴺ⁻¹(s)r/dsᴺ⁻¹ᵢ)|₂²
+    This form appears as a perspective quadratic constraint, which is convex.
+
+    @param derivative_order is the order of the derivative to be minimized.
+    @param weight is the relative weight of the cost.
+
+    @throws std::exception if the derivative order <= 1.
+    @throws std::exception if the derivative order is greater than the order of
+    the subgraph.
+    */
+    void AddNormalizedPathDerivativeCost(int derivative_order,
+                                         double weight = 1.0);
+
     /** Adds a linear velocity constraint to the subgraph `lb` ≤ q̇(t) ≤
     `ub`.
     @param lb is the lower bound of the velocity.
@@ -621,6 +661,42 @@ class GcsTrajectoryOptimization final {
   */
   void AddPathLengthCost(double weight = 1.0);
 
+  /** Adds a convex cost to minimize the normalized path derivative.
+  As a surrogate for the trajectories dervitative dᴺq(t)/dtᴺ, we will add a
+  cost to the derviative of the path normalized by the duration. The path
+  derivative will be upper bounded by the sum of discrete differences on the
+  control points like so:
+  h⁻¹ ∑ weight_matrix * |(dᴺ⁻¹r(s)/dsᴺ⁻¹ᵢ₊₁ − dᴺ⁻¹(s)r/dsᴺ⁻¹ᵢ)|₂²
+  This form appears as a perspective quadratic constraint, which is convex.
+
+  @param derivative_order is the order of the derivative to be minimized.
+  @param weight_matrix is the relative weight of each component for the cost.
+  The diagonal of the matrix is the weight for each dimension. The
+  off-diagonal elements are the weight for the cross terms, which can be used
+  to penalize diagonal movement.
+  @pre weight_matrix must be of size num_positions() x num_positions().
+
+  @throws std::exception if the derivative order <= 1.
+  */
+  void AddNormalizedPathDerivativeCost(int derivative_order,
+                                       const Eigen::MatrixXd& weight_matrix);
+
+  /** Adds a convex cost to minimize the normalized path derivative.
+  As a surrogate for the trajectories dervitative dᴺq(t)/dtᴺ, we will add a
+  cost to the derviative of the path normalized by the duration. The path
+  derivative will be upper bounded by the sum of discrete differences on the
+  control points like so:
+  h⁻¹ ∑ weight_matrix * |(dᴺ⁻¹r(s)/dsᴺ⁻¹ᵢ₊₁ − dᴺ⁻¹(s)r/dsᴺ⁻¹ᵢ)|₂²
+  This form appears as a perspective quadratic constraint, which is convex.
+
+  @param derivative_order is the order of the derivative to be minimized.
+  @param weight is the relative weight of the cost.
+
+  @throws std::exception if the derivative order <= 1.
+  */
+  void AddNormalizedPathDerivativeCost(int derivative_order,
+                                       double weight = 1.0);
+
   /** Adds a linear velocity constraint to the entire graph `lb` ≤ q̇(t) ≤
   `ub`.
   @param lb is the lower bound of the velocity.
@@ -860,6 +936,8 @@ class GcsTrajectoryOptimization final {
       global_nonlinear_derivative_bounds_{};
   std::vector<int> global_path_continuity_constraints_{};
   std::vector<int> global_continuity_constraints_{};
+  std::vector<std::tuple<int, Eigen::MatrixXd>>
+      global_normalized_path_derivative_costs_;
 };
 
 /** Returns a list of indices in the plant's generalized positions which

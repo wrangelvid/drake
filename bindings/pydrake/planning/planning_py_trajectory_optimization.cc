@@ -385,6 +385,18 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
             py::overload_cast<double>(&Class::Subgraph::AddPathLengthCost),
             py::arg("weight") = 1.0,
             subgraph_doc.AddPathLengthCost.doc_1args_weight)
+        .def("AddNormalizedPathDerivativeCost",
+            py::overload_cast<int, const Eigen::MatrixXd&>(
+                &Class::Subgraph::AddNormalizedPathDerivativeCost),
+            py::arg("derivative_order"), py::arg("weight_matrix"),
+            subgraph_doc.AddNormalizedPathDerivativeCost
+                .doc_2args_derivative_order_weight_matrix)
+        .def("AddNormalizedPathDerivativeCost",
+            py::overload_cast<int, double>(
+                &Class::Subgraph::AddNormalizedPathDerivativeCost),
+            py::arg("derivative_order"), py::arg("weight") = 1.0,
+            subgraph_doc.AddNormalizedPathDerivativeCost
+                .doc_2args_derivative_order_weight)
         .def("AddVelocityBounds", &Class::Subgraph::AddVelocityBounds,
             py::arg("lb"), py::arg("ub"), subgraph_doc.AddVelocityBounds.doc)
         .def("AddNonlinearDerivativeBounds",
@@ -485,6 +497,18 @@ void DefinePlanningTrajectoryOptimization(py::module m) {
         .def("AddPathLengthCost",
             py::overload_cast<double>(&Class::AddPathLengthCost),
             py::arg("weight") = 1.0, cls_doc.AddPathLengthCost.doc_1args_weight)
+        .def("AddNormalizedPathDerivativeCost",
+            py::overload_cast<int, const Eigen::MatrixXd&>(
+                &Class::AddNormalizedPathDerivativeCost),
+            py::arg("derivative_order"), py::arg("weight_matrix"),
+            cls_doc.AddNormalizedPathDerivativeCost
+                .doc_2args_derivative_order_weight_matrix)
+        .def("AddNormalizedPathDerivativeCost",
+            py::overload_cast<int, double>(
+                &Class::AddNormalizedPathDerivativeCost),
+            py::arg("derivative_order"), py::arg("weight") = 1.0,
+            cls_doc.AddNormalizedPathDerivativeCost
+                .doc_2args_derivative_order_weight)
         .def("AddVelocityBounds", &Class::AddVelocityBounds, py::arg("lb"),
             py::arg("ub"), cls_doc.AddVelocityBounds.doc)
         .def("AddNonlinearDerivativeBounds",
